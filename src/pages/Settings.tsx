@@ -191,18 +191,6 @@ const Settings = () => {
           SAVE SETTINGS
         </Button>
       </div>
-
-      <Button
-        fullWidth
-        size="lg"
-        onClick={() => navigate('/statistics')}
-        style={{
-          marginTop: '1.5rem',
-          background: 'linear-gradient(45deg, #00FFFF, #FF00FF)',
-        }}
-      >
-        VIEW STATISTICS
-      </Button>
     </Container>
   );
 };

@@ -18,11 +18,38 @@ const config: CapacitorConfig = {
       color: "#000020",
       resume: true,
       hidden: false,
-      disableWebViewOptimizations: true
+      disableWebViewOptimizations: true,
+      moveToBackground: false,
+      overrideUserActivity: true,
+      allowBluetooth: true,
+      disableBatteryOptimizations: true
+    },
+    Notification: {
+      sound: "beep.wav",
+      smallIcon: "ic_stat_icon_config_sample",
+      iconColor: "#FF00FF"
     }
   },
   android: {
-    backgroundColor: "#000020"
+    backgroundColor: "#000020",
+    allowMixedContent: true,
+    captureInput: true,
+    webContentsDebuggingEnabled: true
+  },
+  server: {
+    cleartext: true,
+    hostname: "localhost"
+  },
+  cordova: {
+    preferences: {
+      "BackgroundMode": "true",
+      "BackgroundModeEnable": "true",
+      "KeepRunning": "true",
+      "AllowInlineMediaPlayback": "true",
+      "LoadUrlTimeoutValue": "60000",
+      "android-minSdkVersion": "21",
+      "android-targetSdkVersion": "33"
+    }
   }
 };
 

@@ -1,4 +1,19 @@
-import { BackgroundMode } from '@ionic-native/background-mode';
+/**
+ * BackgroundService.ts
+ * A service to handle background operations for the app
+ */
+
+import { registerPlugin } from '@capacitor/core';
+
+// Define the interface for our BackgroundMode plugin
+interface BackgroundModePlugin {
+  enable(): Promise<{ value: boolean }>;
+  disable(): Promise<{ value: boolean }>;
+  isEnabled(): Promise<{ value: boolean }>;
+}
+
+// Register the BackgroundMode plugin
+const BackgroundMode = registerPlugin<BackgroundModePlugin>('BackgroundMode');
 
 class BackgroundService {
   private static instance: BackgroundService;
@@ -19,81 +34,143 @@ class BackgroundService {
 
   public initialize(): void {
     if (this.isInitialized) return;
-
+    
     try {
-      // Initialize background mode
-      if (typeof BackgroundMode !== 'undefined') {
-        BackgroundMode.enable();
-        
-        // Configure background mode
-        BackgroundMode.setDefaults({
-          title: 'Screen Time Reminder',
-          text: 'Tracking your screen time in background',
-          icon: 'notification_icon',
-          color: '#000020',
-          resume: true,
-          hidden: false
-        });
-
-        // Handle events
-        BackgroundMode.on('activate').subscribe(() => {
-          console.log('Background mode activated');
-          this.startBackgroundTracking();
-        });
-
-        BackgroundMode.on('deactivate').subscribe(() => {
-          console.log('Background mode deactivated');
-          this.stopBackgroundTracking();
-        });
-
-        // Prevent the app from being paused
-        BackgroundMode.disableWebViewOptimizations();
-        
-        this.isInitialized = true;
-        console.log('Background service initialized');
-      } else {
-        console.warn('BackgroundMode plugin not available');
+      // Check if we're in a mobile environment
+      const isMobileEnvironment = this.isMobileEnvironment();
+      
+      if (!isMobileEnvironment) {
+        console.log('Not in a mobile environment, skipping background mode initialization');
+        return;
       }
+
+      // Enable background mode
+      this.enableBackgroundMode();
+      
+      this.isInitialized = true;
     } catch (error) {
-      console.error('Error initializing background service:', error);
+      console.error('Critical error in background service initialization:', error);
     }
   }
 
-  public setTrackingCallback(callback: () => void): void {
+  private isMobileEnvironment(): boolean {
+    try {
+      return typeof window !== 'undefined' && 
+        (this.isCordovaEnvironment() || this.isCapacitorEnvironment());
+    } catch (e) {
+      console.error('Error checking mobile environment:', e);
+      return false;
+    }
+  }
+
+  private isCordovaEnvironment(): boolean {
+    try {
+      return typeof window !== 'undefined' && 
+        'cordova' in window;
+    } catch (e) {
+      console.error('Error checking Cordova environment:', e);
+      return false;
+    }
+  }
+
+  private isCapacitorEnvironment(): boolean {
+    try {
+      return typeof window !== 'undefined' && 
+        'Capacitor' in window;
+    } catch (e) {
+      console.error('Error checking Capacitor environment:', e);
+      return false;
+    }
+  }
+
+  private async enableBackgroundMode(): Promise<void> {
+    try {
+      console.log('Enabling background mode...');
+      
+      // Check if BackgroundMode plugin is available
+      if (!BackgroundMode) {
+        console.warn('BackgroundMode plugin not available');
+        return;
+      }
+      
+      // Enable background mode
+      const result = await BackgroundMode.enable();
+      console.log('Background mode enabled:', result.value);
+    } catch (error) {
+      console.error('Error enabling background mode:', error);
+    }
+  }
+
+  public setTrackingCallback(callback: (() => void) | null): void {
+    if (!callback) {
+      console.warn('Null tracking callback provided');
+      return;
+    }
+    
     this.trackingCallback = callback;
+    console.log('Tracking callback set');
+    
+    // If already initialized, start tracking immediately
+    if (this.isInitialized && !this.updateInterval) {
+      this.startBackgroundTracking();
+    }
   }
 
   private startBackgroundTracking(): void {
+    // Clear any existing interval first to prevent duplicates
+    this.stopBackgroundTracking();
+    
     if (!this.trackingCallback) {
-      console.warn('No tracking callback set');
+      console.warn('No tracking callback set, cannot start background tracking');
       return;
     }
 
-    // Run the tracking callback immediately
-    this.trackingCallback();
+    try {
+      // Run the tracking callback immediately
+      this.trackingCallback();
 
-    // Set up interval to run the tracking callback every 10 seconds
-    this.updateInterval = window.setInterval(() => {
-      if (this.trackingCallback) {
-        this.trackingCallback();
-      }
-    }, 10000);
+      // Set up interval with a more conservative update frequency (30 seconds)
+      // to reduce battery usage and potential crashes
+      this.updateInterval = window.setInterval(() => {
+        try {
+          if (this.trackingCallback) {
+            this.trackingCallback();
+          }
+        } catch (callbackError) {
+          console.error('Error in tracking callback:', callbackError);
+          // Don't let a single callback error crash the entire tracking
+        }
+      }, 30000); // 30 seconds to reduce battery drain and potential crashes
 
-    console.log('Background tracking started');
+      console.log('Background tracking started with 30-second interval');
+    } catch (trackingError) {
+      console.error('Error starting background tracking:', trackingError);
+    }
   }
 
   private stopBackgroundTracking(): void {
-    if (this.updateInterval) {
-      clearInterval(this.updateInterval);
-      this.updateInterval = null;
+    try {
+      if (this.updateInterval) {
+        clearInterval(this.updateInterval);
+        this.updateInterval = null;
+        console.log('Background tracking stopped');
+      }
+    } catch (error) {
+      console.error('Error stopping background tracking:', error);
     }
-    console.log('Background tracking stopped');
   }
 
   public disableBackgroundMode(): void {
-    if (typeof BackgroundMode !== 'undefined') {
+    try {
       this.stopBackgroundTracking();
-      BackgroundMode.disable();
+      
+      if (BackgroundMode) {
+        BackgroundMode.disable()
+          .then(() => console.log('Background mode disabled'))
+          .catch(error => console.error('Error disabling background mode:', error));
+      }
+    } catch (error) {
+      console.error('Error in disableBackgroundMode:', error);
     }
   }
 }

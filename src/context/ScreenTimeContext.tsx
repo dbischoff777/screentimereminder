@@ -1,6 +1,15 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import BackgroundService from '../services/BackgroundService';
 
+// Add type declaration for Capacitor on window object
+declare global {
+  interface Window {
+    Capacitor?: {
+      isNativePlatform: () => boolean;
+    };
+  }
+}
+
 // Interface for app usage data
 interface AppUsage {
   name: string;
@@ -255,97 +264,137 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
 
   // Initialize background service
   useEffect(() => {
-    const backgroundService = BackgroundService.getInstance();
+    let backgroundService: any = null;
     
     try {
-      // Initialize the background service
-      backgroundService.initialize();
+      // Safely get the background service instance
+      backgroundService = BackgroundService.getInstance();
       
-      // Set up tracking callback
-      backgroundService.setTrackingCallback(() => {
-        // Update active app usage
-        if (activeApp && trackingStartTime) {
-          const currentTime = Date.now();
-          const elapsedMinutes = (currentTime - trackingStartTime) / 60000;
-          
-          setAppUsageData(prevData => 
-            prevData.map(app => 
-              app.name === activeApp 
-                ? { ...app, time: app.time + elapsedMinutes, lastUsed: new Date() }
-                : app
-            )
-          );
-          
-          // Reset tracking start time to now for next interval
-          setTrackingStartTime(currentTime);
-        }
-        
-        // Also run the simulation in background
-        simulateAppUsage();
-      });
-    } catch (error) {
-      console.error('Error setting up background service:', error);
+      // Initialize the background service with error handling
+      try {
+        backgroundService.initialize();
+      } catch (initError) {
+        console.error('Failed to initialize background service:', initError);
+        // Continue execution even if initialization fails
+      }
+      
+      // Set up tracking callback with error handling
+      try {
+        backgroundService.setTrackingCallback(() => {
+          try {
+            // Update active app usage
+            if (activeApp && trackingStartTime) {
+              const currentTime = Date.now();
+              const elapsedMinutes = (currentTime - trackingStartTime) / 60000;
+              
+              setAppUsageData(prevData => 
+                prevData.map(app => 
+                  app.name === activeApp 
+                    ? { ...app, time: app.time + elapsedMinutes, lastUsed: new Date() }
+                    : app
+                )
+              );
+              
+              // Reset tracking start time to now for next interval
+              setTrackingStartTime(currentTime);
+            }
+            
+            // Also run the simulation in background with error handling
+            try {
+              simulateAppUsage();
+            } catch (simError) {
+              console.error('Error in app usage simulation:', simError);
+            }
+          } catch (callbackError) {
+            console.error('Error in background tracking callback:', callbackError);
+          }
+        });
+      } catch (callbackSetupError) {
+        console.error('Failed to set tracking callback:', callbackSetupError);
+      }
+    } catch (serviceError) {
+      console.error('Error accessing background service:', serviceError);
     }
     
     return () => {
       // Clean up background service when component unmounts
-      try {
-        backgroundService.disableBackgroundMode();
-      } catch (error) {
-        console.error('Error disabling background service:', error);
+      if (backgroundService) {
+        try {
+          backgroundService.disableBackgroundMode();
+        } catch (error) {
+          console.error('Error disabling background service:', error);
+          // Continue cleanup even if this fails
+        }
       }
     };
   }, []);
 
   // Extract simulateAppUsage function to be used in background service
   const simulateAppUsage = () => {
-    // Simulate more realistic usage patterns
-    setAppUsageData(prevData => {
-      // Create a copy of the data
-      const updatedData = [...prevData];
-      
-      // Determine which apps to update based on time of day
-      const hour = new Date().getHours();
-      let categoriesToUpdate: string[] = [];
-      
-      // Morning (6-12): Productivity, Social Media
-      if (hour >= 6 && hour < 12) {
-        categoriesToUpdate = ['Productivity', 'Social Media'];
-      }
-      // Afternoon (12-18): Entertainment, Social Media, Games
-      else if (hour >= 12 && hour < 18) {
-        categoriesToUpdate = ['Entertainment', 'Social Media', 'Games'];
-      }
-      // Evening (18-23): Entertainment, Games, Social Media
-      else if (hour >= 18 && hour < 23) {
-        categoriesToUpdate = ['Entertainment', 'Games', 'Social Media'];
-      }
-      // Night (23-6): Entertainment, Social Media
-      else {
-        categoriesToUpdate = ['Entertainment', 'Social Media'];
-      }
-      
-      // Update apps in the selected categories
-      categoriesToUpdate.forEach(category => {
-        const appsInCategory = updatedData.filter(app => app.category === category);
-        if (appsInCategory.length > 0) {
-          // Randomly select an app from this category
-          const randomApp = appsInCategory[Math.floor(Math.random() * appsInCategory.length)];
-          const appIndex = updatedData.findIndex(app => app.name === randomApp.name);
+    try {
+      // Simulate more realistic usage patterns
+      setAppUsageData(prevData => {
+        try {
+          // Create a copy of the data
+          const updatedData = [...prevData];
           
-          // Add 1-3 minutes of usage
-          const additionalTime = (Math.random() * 2 + 1) / 6; // 1-3 minutes divided by 6 (10-second intervals)
+          // Determine which apps to update based on time of day
+          const hour = new Date().getHours();
+          let categoriesToUpdate: string[] = [];
           
-          updatedData[appIndex] = {
-            ...updatedData[appIndex],
-            time: updatedData[appIndex].time + additionalTime,
-            lastUsed: new Date()
-          };
+          // Morning (6-12): Productivity, Social Media
+          if (hour >= 6 && hour < 12) {
+            categoriesToUpdate = ['Productivity', 'Social Media'];
+          }
+          // Afternoon (12-18): Entertainment, Social Media, Games
+          else if (hour >= 12 && hour < 18) {
+            categoriesToUpdate = ['Entertainment', 'Social Media', 'Games'];
+          }
+          // Evening (18-23): Entertainment, Games, Social Media
+          else if (hour >= 18 && hour < 23) {
+            categoriesToUpdate = ['Entertainment', 'Games', 'Social Media'];
+          }
+          // Night (23-6): Entertainment, Social Media
+          else {
+            categoriesToUpdate = ['Entertainment', 'Social Media'];
+          }
+          
+          // Update apps in the selected categories
+          categoriesToUpdate.forEach(category => {
+            try {
+              const appsInCategory = updatedData.filter(app => app.category === category);
+              if (appsInCategory.length > 0) {
+                // Randomly select an app from this category
+                const randomApp = appsInCategory[Math.floor(Math.random() * appsInCategory.length)];
+                const appIndex = updatedData.findIndex(app => app.name === randomApp.name);
+                
+                if (appIndex !== -1) {
+                  // Add 1-3 minutes of usage
+                  const additionalTime = (Math.random() * 2 + 1) / 6; // 1-3 minutes divided by 6 (10-second intervals)
+                  
+                  updatedData[appIndex] = {
+                    ...updatedData[appIndex],
+                    time: updatedData[appIndex].time + additionalTime,
+                    lastUsed: new Date()
+                  };
+                }
+              }
+            } catch (categoryError) {
+              console.error(`Error updating category ${category}:`, categoryError);
+              // Continue with other categories even if one fails
+            }
+          });
+          
+          return updatedData;
+        } catch (dataError) {
+          console.error('Error updating app usage data:', dataError);
+          // Return original data if update fails
+          return prevData;
         }
       });
-      
-      return updatedData;
-    });
+    } catch (error) {
+      console.error('Critical error in simulateAppUsage:', error);
+    }
   };
 
   // Calculate total screen time across all apps
@@ -355,26 +404,83 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
 
   // Check if screen time limit is reached and show notification
   useEffect(() => {
-    const checkScreenTimeLimit = () => {
+    const checkScreenTimeLimit = async () => {
       const totalTime = getTotalScreenTime();
       
       if (notificationsEnabled) {
-        // Notify when approaching limit
+        // Check if we're on a mobile device with Capacitor
+        const isCapacitorNative = typeof window !== 'undefined' && 
+                                 window.Capacitor && 
+                                 window.Capacitor.isNativePlatform();
+        
+        // Approaching limit notification
         if (totalTime >= (screenTimeLimit - notificationFrequency) && totalTime < screenTimeLimit) {
-          if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification('Screen Time Limit Approaching', {
-              body: `You're ${Math.round(screenTimeLimit - totalTime)} minutes away from your daily limit.`,
-              icon: '/notification-icon.png'
-            });
+          if (isCapacitorNative) {
+            try {
+              // Use Capacitor LocalNotifications for mobile
+              const { LocalNotifications } = await import('@capacitor/local-notifications');
+              await LocalNotifications.schedule({
+                notifications: [
+                  {
+                    title: 'Screen Time Limit Approaching',
+                    body: `You're ${Math.round(screenTimeLimit - totalTime)} minutes away from your daily limit.`,
+                    id: 1,
+                    schedule: { at: new Date(Date.now()) }
+                  }
+                ]
+              });
+              console.log('Capacitor notification sent: approaching limit');
+            } catch (error) {
+              console.error('Error showing Capacitor notification:', error);
+            }
+          } else if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+            // Fallback to web Notification API
+            try {
+              new Notification('Screen Time Limit Approaching', {
+                body: `You're ${Math.round(screenTimeLimit - totalTime)} minutes away from your daily limit.`,
+                icon: '/notification-icon.png'
+              });
+              console.log('Web notification sent: approaching limit');
+            } catch (error) {
+              console.error('Error showing web notification:', error);
+            }
+          } else {
+            console.log('Notification would be shown: approaching limit');
           }
         }
-        // Notify when limit reached
+        // Limit reached notification
         else if (totalTime >= screenTimeLimit) {
-          if ('Notification' in window && Notification.permission === 'granted') {
-            new Notification('Screen Time Limit Reached', {
-              body: `You've reached your daily screen time limit of ${screenTimeLimit} minutes.`,
-              icon: '/notification-icon.png'
-            });
+          if (isCapacitorNative) {
+            try {
+              // Use Capacitor LocalNotifications for mobile
+              const { LocalNotifications } = await import('@capacitor/local-notifications');
+              await LocalNotifications.schedule({
+                notifications: [
+                  {
+                    title: 'Screen Time Limit Reached',
+                    body: `You've reached your daily screen time limit of ${screenTimeLimit} minutes.`,
+                    id: 2,
+                    schedule: { at: new Date(Date.now()) }
+                  }
+                ]
+              });
+              console.log('Capacitor notification sent: limit reached');
+            } catch (error) {
+              console.error('Error showing Capacitor notification:', error);
+            }
+          } else if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+            // Fallback to web Notification API
+            try {
+              new Notification('Screen Time Limit Reached', {
+                body: `You've reached your daily screen time limit of ${screenTimeLimit} minutes.`,
+                icon: '/notification-icon.png'
+              });
+              console.log('Web notification sent: limit reached');
+            } catch (error) {
+              console.error('Error showing web notification:', error);
+            }
+          } else {
+            console.log('Notification would be shown: limit reached');
           }
         }
       }

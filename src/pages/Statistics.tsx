@@ -175,14 +175,17 @@ const Statistics = () => {
                 margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                <XAxis dataKey="name" stroke="#00FFFF" />
+                <XAxis dataKey="name" stroke="#00FFFF" hide={true} />
                 <YAxis stroke="#00FFFF" label={{ value: 'Minutes', angle: -90, position: 'insideLeft', fill: '#00FFFF' }} />
                 <Tooltip 
                   contentStyle={{ 
                     backgroundColor: 'rgba(0, 0, 32, 0.9)', 
                     border: '1px solid #FF00FF',
                     color: '#00FFFF'
-                  }} 
+                  }}
+                  formatter={(value: number, _: any, props: any) => {
+                    return [`${formatTime(value)}`, props.payload.name];
+                  }}
                 />
                 <Bar dataKey="time" fill="#FF00FF" />
               </BarChart>
