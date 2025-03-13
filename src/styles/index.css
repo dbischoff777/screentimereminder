@@ -1,0 +1,66 @@
+/* Reset CSS */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  background-color: #000020; /* Dark blue-black background */
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+  color: #f0f0f0;
+  background-color: #000020; /* Dark blue-black background */
+}
+
+/* Remove default button styling */
+button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* Remove default link styling */
+a {
+  text-decoration: none;
+  color: inherit;
+}
+
+/* Improve accessibility */
+:focus {
+  outline: 2px solid #FF00FF;
+  outline-offset: 2px;
+}
+
+/* Improve form elements */
+input, select, textarea {
+  font-family: inherit;
+}
+
+/* Prevent text size adjustment after orientation changes in iOS */
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+/* Force dark theme for all users */
+:root {
+  color: #f0f0f0;
+  background-color: #000020;
+}

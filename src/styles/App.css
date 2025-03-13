@@ -1,0 +1,118 @@
+/* Import cyberpunk font */
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&display=swap');
+
+/* Cyberpunk theme variables */
+:root {
+  --neon-pink: #FF00FF;
+  --neon-blue: #00FFFF;
+  --neon-green: #00FF00;
+  --neon-yellow: #FFFF00;
+  --dark-bg: #000020;
+  --darker-bg: #000015;
+  --text-color: #f0f0f0;
+}
+
+/* Global styles */
+body {
+  background-color: var(--dark-bg);
+  color: var(--text-color);
+  font-family: 'Orbitron', sans-serif;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  background-size: cover;
+  background-attachment: fixed;
+}
+
+/* App container */
+.app-container {
+  min-height: 100vh;
+  padding-bottom: 70px; /* Space for the navigation bar */
+  background-color: var(--dark-bg);
+  position: relative;
+  z-index: 1;
+}
+
+/* Ensure all containers have the dark background */
+.mantine-Container-root {
+  background-color: var(--dark-bg) !important;
+}
+
+/* Ensure all Paper components have transparent backgrounds */
+.mantine-Paper-root {
+  background-color: transparent !important;
+}
+
+/* Neon text glow animation */
+@keyframes glow {
+  0% {
+    text-shadow: 0 0 10px var(--neon-pink), 0 0 20px var(--neon-pink), 0 0 30px var(--neon-pink);
+  }
+  50% {
+    text-shadow: 0 0 20px var(--neon-blue), 0 0 30px var(--neon-blue), 0 0 40px var(--neon-blue);
+  }
+  100% {
+    text-shadow: 0 0 10px var(--neon-pink), 0 0 20px var(--neon-pink), 0 0 30px var(--neon-pink);
+  }
+}
+
+/* Neon border pulse animation */
+@keyframes borderPulse {
+  0% {
+    box-shadow: 0 0 10px var(--neon-pink);
+  }
+  50% {
+    box-shadow: 0 0 20px var(--neon-blue);
+  }
+  100% {
+    box-shadow: 0 0 10px var(--neon-pink);
+  }
+}
+
+/* Home container */
+.home-container {
+  padding-top: 2rem;
+  padding-bottom: 2rem;
+  background-color: var(--dark-bg);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--darker-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--neon-pink);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--neon-blue);
+}
+
+/* Button hover effects */
+button:hover {
+  transform: scale(1.05);
+  transition: transform 0.3s ease;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .app-container {
+    padding-bottom: 60px;
+  }
+}
+
+/* Force dark background on html and body */
+html, body, #root {
+  background-color: var(--dark-bg) !important;
+}
+
+/* Override any potential white backgrounds */
+* {
+  background-color: transparent;
+}
