@@ -13,16 +13,16 @@ const config: CapacitorConfig = {
     BackgroundMode: {
       enable: true,
       title: "Screen Time Reminder",
-      text: "Tracking your screen time in background",
+      text: "Tracking your screen time",
       icon: "notification_icon",
       color: "#000020",
       resume: true,
       hidden: false,
-      disableWebViewOptimizations: true,
+      disableWebViewOptimizations: false,
       moveToBackground: false,
-      overrideUserActivity: true,
-      allowBluetooth: true,
-      disableBatteryOptimizations: true
+      overrideUserActivity: false,
+      allowBluetooth: false,
+      disableBatteryOptimizations: false
     },
     Notification: {
       sound: "beep.wav",
@@ -47,7 +47,7 @@ const config: CapacitorConfig = {
       "KeepRunning": "true",
       "AllowInlineMediaPlayback": "true",
       "LoadUrlTimeoutValue": "60000",
-      "android-minSdkVersion": "21",
+      "android-minSdkVersion": "23",
       "android-targetSdkVersion": "33"
     }
   }
