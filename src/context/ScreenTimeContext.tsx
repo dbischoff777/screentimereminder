@@ -38,22 +38,7 @@ interface ScreenTimeContextType {
 const ScreenTimeContext = createContext<ScreenTimeContextType | undefined>(undefined);
 
 // More realistic app categories with proper categorization
-const defaultAppCategories: AppUsage[] = [
-  { name: 'Instagram', time: 0, color: '#E1306C', category: 'Social Media', lastUsed: undefined },
-  { name: 'Facebook', time: 0, color: '#4267B2', category: 'Social Media', lastUsed: undefined },
-  { name: 'TikTok', time: 0, color: '#000000', category: 'Social Media', lastUsed: undefined },
-  { name: 'Twitter', time: 0, color: '#1DA1F2', category: 'Social Media', lastUsed: undefined },
-  { name: 'YouTube', time: 0, color: '#FF0000', category: 'Entertainment', lastUsed: undefined },
-  { name: 'Netflix', time: 0, color: '#E50914', category: 'Entertainment', lastUsed: undefined },
-  { name: 'Spotify', time: 0, color: '#1DB954', category: 'Entertainment', lastUsed: undefined },
-  { name: 'Chrome', time: 0, color: '#4285F4', category: 'Productivity', lastUsed: undefined },
-  { name: 'Gmail', time: 0, color: '#D44638', category: 'Productivity', lastUsed: undefined },
-  { name: 'Microsoft Office', time: 0, color: '#D83B01', category: 'Productivity', lastUsed: undefined },
-  { name: 'Minecraft', time: 0, color: '#70B237', category: 'Games', lastUsed: undefined },
-  { name: 'Fortnite', time: 0, color: '#9D4DFF', category: 'Games', lastUsed: undefined },
-  { name: 'Duolingo', time: 0, color: '#58CC02', category: 'Education', lastUsed: undefined },
-  { name: 'Khan Academy', time: 0, color: '#14BF96', category: 'Education', lastUsed: undefined }
-];
+const defaultAppCategories: AppUsage[] = [];
 
 // Get category color mapping
 const getCategoryColor = (category: string): string => {
@@ -135,29 +120,55 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
 
   // Reset daily usage stats
   const resetDailyUsage = () => {
-    // Reset all app usage data to zero
-    const resetData = defaultAppCategories.map(app => ({
-      ...app,
-      time: 0,
-      isActive: false,
-      lastUsed: undefined
-    }));
+    console.log('ScreenTimeContext: resetDailyUsage called');
     
-    // Update state with reset data
-    setAppUsageData(resetData);
-    
-    // Explicitly save to localStorage to ensure persistence
-    localStorage.setItem('appUsageData', JSON.stringify(resetData));
-    
-    // Reset active app tracking
-    setActiveApp(null);
-    setTrackingStartTime(null);
-    
-    console.log('App usage data has been reset');
+    try {
+      // Reset all app usage data to zero but preserve the app list
+      const prevData = [...appUsageData];
+      console.log('Previous data count:', prevData.length);
+      
+      // If we have no previous data, return an empty array
+      if (!prevData || prevData.length === 0) {
+        console.log('No previous data to reset');
+        return true;
+      }
+      
+      // Reset time to zero for all existing apps
+      const resetData = prevData.map(app => ({
+        ...app,
+        time: 0,
+        isActive: false,
+        lastUsed: undefined
+      }));
+      
+      console.log(`Reset ${resetData.length} apps to zero usage time`);
+      
+      // Explicitly save to localStorage to ensure persistence
+      localStorage.setItem('appUsageData', JSON.stringify(resetData));
+      console.log('Reset data saved to localStorage');
+      
+      // Update state with reset data - this triggers UI updates
+      setAppUsageData(resetData);
+      
+      // Reset active app tracking
+      setActiveApp(null);
+      setTrackingStartTime(null);
+      
+      // Set the last reset date to today
+      localStorage.setItem('lastResetDate', new Date().toDateString());
+      
+      console.log('App usage data has been reset successfully');
+      return true;
+    } catch (error) {
+      console.error('Error resetting app usage data:', error);
+      return false;
+    }
   };
 
   // Start tracking an app
-  const startTrackingApp = (appName: string, category: string) => {
+  const startTrackingApp = (appName: string, category: string = 'Uncategorized') => {
+    console.log(`Starting to track app: ${appName} in category: ${category}`);
+    
     // Stop tracking any currently active app
     if (activeApp) {
       stopTrackingApp(activeApp);
@@ -165,6 +176,26 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     
     setActiveApp(appName);
     setTrackingStartTime(Date.now());
+    
+    // Determine the appropriate category based on app name
+    let detectedCategory = category;
+    let appColor = '';
+    
+    // Auto-categorize common apps
+    if (/instagram|facebook|twitter|tiktok|snapchat|whatsapp|telegram|messenger/i.test(appName)) {
+      detectedCategory = 'Social Media';
+    } else if (/youtube|netflix|hulu|disney|spotify|music|video|player|movie/i.test(appName)) {
+      detectedCategory = 'Entertainment';
+    } else if (/chrome|safari|firefox|edge|browser|gmail|outlook|office|word|excel|powerpoint|docs/i.test(appName)) {
+      detectedCategory = 'Productivity';
+    } else if (/game|minecraft|fortnite|roblox|pubg|cod|league|dota/i.test(appName)) {
+      detectedCategory = 'Games';
+    } else if (/duolingo|khan|academy|learn|course|study|school|education/i.test(appName)) {
+      detectedCategory = 'Education';
+    }
+    
+    // Get color based on category
+    appColor = getCategoryColor(detectedCategory);
     
     // Update app status to active
     setAppUsageData(prevData => {
@@ -174,18 +205,19 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
       if (appExists) {
         return prevData.map(app => 
           app.name === appName 
-            ? { ...app, isActive: true, lastUsed: new Date() }
+            ? { ...app, isActive: true, lastUsed: new Date(), category: detectedCategory, color: appColor }
             : app
         );
       } else {
         // Add new app if it doesn't exist
+        console.log(`Adding new app to tracking: ${appName} (${detectedCategory})`);
         return [
           ...prevData,
           {
             name: appName,
             time: 0,
-            color: getCategoryColor(category),
-            category,
+            color: appColor,
+            category: detectedCategory,
             lastUsed: new Date(),
             isActive: true
           }
@@ -343,6 +375,11 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
 
   // Extract simulateAppUsage function to be used in background service
   const simulateAppUsage = () => {
+    // Disabled - we're now tracking actual app usage instead of simulating it
+    console.log('App usage simulation is disabled - tracking real usage only');
+    return;
+    
+    /* Original simulation code removed
     try {
       // Simulate more realistic usage patterns
       setAppUsageData(prevData => {
@@ -407,6 +444,7 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     } catch (error) {
       console.error('Critical error in simulateAppUsage:', error);
     }
+    */
   };
 
   // Calculate total screen time across all apps

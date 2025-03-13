@@ -19,19 +19,26 @@ const Statistics = () => {
   
   // Check if we're coming from the settings page after a reset
   useEffect(() => {
+    console.log('Location state changed:', location.state);
+    
     const fromSettings = location.state?.fromReset === true;
     if (fromSettings) {
+      console.log('Detected reset from Settings page, timestamp:', location.state?.timestamp);
+      
       // Force refresh data
       refreshData();
       
+      // Show reset notification
       setShowResetNotification(true);
+      
       // Hide notification after 3 seconds
       const timer = setTimeout(() => {
         setShowResetNotification(false);
       }, 3000);
+      
       return () => clearTimeout(timer);
     }
-  }, [location]);
+  }, [location.state]);
   
   useEffect(() => {
     // Calculate total screen time
@@ -95,25 +102,37 @@ const Statistics = () => {
   }, [pullDistance]);
   
   const refreshData = () => {
+    console.log('Refreshing data...');
+    
     // Show loading state
     setIsRefreshing(true);
     
-    // Force re-fetch data from context
-    const total = getTotalScreenTime();
-    setTotalScreenTime(total);
-    
-    // Calculate percentage of limit
-    const percent = (total / screenTimeLimit) * 100;
-    setPercentOfLimit(Math.min(percent, 100));
-    
-    // Simulate a short delay to show loading state (can be removed in production)
-    setTimeout(() => {
-      // Hide loading state
-      setIsRefreshing(false);
+    try {
+      // Force reload data from localStorage
+      const savedData = localStorage.getItem('appUsageData');
+      console.log('Data from localStorage:', savedData ? 'Found' : 'Not found');
       
-      // Log refresh for debugging
-      console.log('Statistics data refreshed');
-    }, 500);
+      // Force re-fetch data from context
+      const total = getTotalScreenTime();
+      console.log('Total screen time:', total);
+      setTotalScreenTime(total);
+      
+      // Calculate percentage of limit
+      const percent = (total / screenTimeLimit) * 100;
+      setPercentOfLimit(Math.min(percent, 100));
+      
+      // Simulate a short delay to show loading state
+      setTimeout(() => {
+        // Hide loading state
+        setIsRefreshing(false);
+        
+        // Log refresh for debugging
+        console.log('Statistics data refreshed successfully');
+      }, 500);
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+      setIsRefreshing(false);
+    }
   };
 
   // Sort apps by usage time (descending)

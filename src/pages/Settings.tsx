@@ -35,6 +35,11 @@ const Settings = () => {
     setPreviousNotificationState(notificationsEnabled);
   }, [notificationsEnabled]);
 
+  // Log modal state changes
+  useEffect(() => {
+    console.log('Modal state changed:', resetModalOpen);
+  }, [resetModalOpen]);
+
   const handleSaveSettings = () => {
     // If notifications were just enabled or we're on mobile and notifications are enabled,
     // always navigate to the permission page
@@ -51,11 +56,40 @@ const Settings = () => {
   };
 
   const handleResetUsage = () => {
-    resetDailyUsage();
-    setResetModalOpen(false);
+    console.log('Reset button clicked - handleResetUsage function triggered');
     
-    // Navigate to Statistics page to show the reset data
-    navigate('/statistics', { state: { fromReset: true } });
+    // Verify that resetDailyUsage exists
+    if (!resetDailyUsage) {
+      console.error('resetDailyUsage function is not available!');
+      alert('Error: Reset function not available. Please reload the app.');
+      return;
+    }
+    
+    try {
+      console.log('Attempting to reset app usage data...');
+      
+      // Call the reset function with direct feedback
+      const resetResult = resetDailyUsage();
+      console.log('Reset function returned:', resetResult);
+      
+      // Close the modal
+      setResetModalOpen(false);
+      
+      // Show an alert for immediate feedback
+      alert('App usage data has been reset successfully!');
+      
+      // Force a reload of the app data from localStorage
+      localStorage.setItem('forceRefresh', Date.now().toString());
+      
+      // Navigate to Statistics page to show the reset data
+      console.log('Navigating to statistics page with reset state');
+      navigate('/statistics', { state: { fromReset: true, timestamp: Date.now() } });
+      
+      console.log('Reset completed and navigating to statistics');
+    } catch (error) {
+      console.error('Error resetting data:', error);
+      alert('There was an error resetting your data. Please try again.');
+    }
   };
 
   // Frequency options
@@ -231,7 +265,12 @@ const Settings = () => {
           fullWidth
           size="lg"
           color="red"
-          onClick={() => setResetModalOpen(true)}
+          onClick={() => {
+            console.log('RESET DAILY USAGE DATA button clicked');
+            console.log('Current resetModalOpen state:', resetModalOpen);
+            setResetModalOpen(true);
+            console.log('New resetModalOpen state:', true);
+          }}
           style={{
             backgroundColor: 'rgba(255, 0, 0, 0.7)',
             color: 'white',
@@ -244,7 +283,10 @@ const Settings = () => {
       {/* Reset Confirmation Modal */}
       <Modal
         opened={resetModalOpen}
-        onClose={() => setResetModalOpen(false)}
+        onClose={() => {
+          console.log('Modal close button clicked');
+          setResetModalOpen(false);
+        }}
         title="Reset Daily Usage Data"
         styles={{
           title: { color: '#FF00FF', fontWeight: 'bold' },
@@ -253,6 +295,7 @@ const Settings = () => {
           close: { color: '#00FFFF' },
         }}
         overlayProps={{ opacity: 0.7, blur: 3 }}
+        zIndex={1000}
       >
         <Text style={{ color: '#FFFFFF', marginBottom: '1.5rem' }}>
           Are you sure you want to reset your daily app usage data? This action cannot be undone.
@@ -268,13 +311,100 @@ const Settings = () => {
           </Button>
           <Button
             color="red"
-            onClick={handleResetUsage}
-            style={{ backgroundColor: 'rgba(255, 0, 0, 0.7)' }}
+            onClick={(e) => {
+              console.log('Reset button in modal clicked');
+              e.preventDefault();
+              handleResetUsage();
+            }}
+            style={{
+              backgroundColor: 'rgba(255, 0, 0, 0.7)'
+            }}
           >
             RESET DATA
           </Button>
         </Group>
       </Modal>
+      
+      {/* Fallback DIV-based Modal */}
+      {resetModalOpen && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.8)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 2000
+          }}
+        >
+          <div 
+            style={{
+              backgroundColor: '#000030',
+              padding: '20px',
+              borderRadius: '8px',
+              width: '80%',
+              maxWidth: '500px',
+              border: '1px solid #FF00FF'
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
+              <h2 style={{ color: '#FF00FF', margin: 0 }}>Reset Daily Usage Data</h2>
+              <button 
+                onClick={() => setResetModalOpen(false)}
+                style={{ 
+                  background: 'none', 
+                  border: 'none', 
+                  color: '#00FFFF', 
+                  fontSize: '20px',
+                  cursor: 'pointer'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            
+            <p style={{ color: '#FFFFFF', marginBottom: '20px' }}>
+              Are you sure you want to reset your daily app usage data? This action cannot be undone.
+            </p>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <button
+                onClick={() => setResetModalOpen(false)}
+                style={{ 
+                  padding: '8px 16px',
+                  backgroundColor: 'transparent',
+                  color: '#00FFFF',
+                  border: '1px solid #00FFFF',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                CANCEL
+              </button>
+              <button
+                onClick={() => {
+                  console.log('Reset button in DIV modal clicked');
+                  handleResetUsage();
+                }}
+                style={{ 
+                  padding: '8px 16px',
+                  backgroundColor: 'rgba(255, 0, 0, 0.7)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                RESET DATA
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Container>
   );
 };
