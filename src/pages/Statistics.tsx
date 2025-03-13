@@ -1,12 +1,37 @@
-import { Container, Title, Text, Grid, RingProgress, Badge } from '@mantine/core';
+import { Container, Title, Text, Grid, RingProgress, Badge, Notification, Loader } from '@mantine/core';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useScreenTime } from '../context/ScreenTimeContext';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
+import { FiCheckCircle, FiRefreshCw } from 'react-icons/fi';
 
 const Statistics = () => {
   const { appUsageData, getTotalScreenTime, screenTimeLimit } = useScreenTime();
   const [totalScreenTime, setTotalScreenTime] = useState(0);
   const [percentOfLimit, setPercentOfLimit] = useState(0);
+  const [showResetNotification, setShowResetNotification] = useState(false);
+  const [isPulling, setIsPulling] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const startY = useRef<number | null>(null);
+  const location = useLocation();
+  
+  // Check if we're coming from the settings page after a reset
+  useEffect(() => {
+    const fromSettings = location.state?.fromReset === true;
+    if (fromSettings) {
+      // Force refresh data
+      refreshData();
+      
+      setShowResetNotification(true);
+      // Hide notification after 3 seconds
+      const timer = setTimeout(() => {
+        setShowResetNotification(false);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [location]);
   
   useEffect(() => {
     // Calculate total screen time
@@ -17,6 +42,79 @@ const Statistics = () => {
     const percent = (total / screenTimeLimit) * 100;
     setPercentOfLimit(Math.min(percent, 100)); // Cap at 100%
   }, [appUsageData, screenTimeLimit, getTotalScreenTime]);
+
+  // Setup pull-to-refresh
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    
+    const handleTouchStart = (e: TouchEvent) => {
+      if (window.scrollY === 0) {
+        startY.current = e.touches[0].clientY;
+      }
+    };
+    
+    const handleTouchMove = (e: TouchEvent) => {
+      if (startY.current !== null) {
+        const currentY = e.touches[0].clientY;
+        const distance = currentY - startY.current;
+        
+        if (distance > 0) {
+          // Prevent default scrolling behavior when pulling down
+          e.preventDefault();
+          
+          // Apply resistance to make it harder to pull
+          const pullWithResistance = Math.min(distance / 2.5, 100);
+          setPullDistance(pullWithResistance);
+          setIsPulling(true);
+        }
+      }
+    };
+    
+    const handleTouchEnd = () => {
+      if (pullDistance > 70) {
+        // Refresh data
+        refreshData();
+      }
+      
+      // Reset pull state
+      startY.current = null;
+      setPullDistance(0);
+      setIsPulling(false);
+    };
+    
+    container.addEventListener('touchstart', handleTouchStart, { passive: false });
+    container.addEventListener('touchmove', handleTouchMove, { passive: false });
+    container.addEventListener('touchend', handleTouchEnd);
+    
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [pullDistance]);
+  
+  const refreshData = () => {
+    // Show loading state
+    setIsRefreshing(true);
+    
+    // Force re-fetch data from context
+    const total = getTotalScreenTime();
+    setTotalScreenTime(total);
+    
+    // Calculate percentage of limit
+    const percent = (total / screenTimeLimit) * 100;
+    setPercentOfLimit(Math.min(percent, 100));
+    
+    // Simulate a short delay to show loading state (can be removed in production)
+    setTimeout(() => {
+      // Hide loading state
+      setIsRefreshing(false);
+      
+      // Log refresh for debugging
+      console.log('Statistics data refreshed');
+    }, 500);
+  };
 
   // Sort apps by usage time (descending)
   const sortedApps = [...appUsageData].sort((a, b) => b.time - a.time);
@@ -54,14 +152,94 @@ const Statistics = () => {
 
   return (
     <Container 
+      ref={containerRef}
       size="md" 
       py="xl" 
       style={{
         background: '#000020', // Dark blue-black background
         minHeight: '100vh',
-        padding: '1rem'
+        padding: '1rem',
+        position: 'relative',
+        overflowX: 'hidden'
       }}
     >
+      {/* Pull to refresh indicator */}
+      {isPulling && (
+        <div 
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: `${pullDistance}px`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'rgba(0, 255, 255, 0.1)',
+            borderBottom: '1px solid #00FFFF',
+            transition: isPulling ? 'none' : 'height 0.3s ease',
+            overflow: 'hidden',
+            zIndex: 10
+          }}
+        >
+          <div style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '8px',
+            color: '#00FFFF',
+            transform: `rotate(${pullDistance * 3}deg)`
+          }}>
+            <FiRefreshCw size={20} />
+            <Text>{pullDistance > 70 ? 'Release to refresh' : 'Pull down to refresh'}</Text>
+          </div>
+        </div>
+      )}
+      
+      {/* Loading indicator */}
+      {isRefreshing && (
+        <div 
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'rgba(0, 0, 32, 0.7)',
+            zIndex: 100
+          }}
+        >
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '10px'
+          }}>
+            <Loader color="#00FFFF" size="lg" variant="bars" />
+            <Text style={{ color: '#00FFFF' }}>Refreshing data...</Text>
+          </div>
+        </div>
+      )}
+      
+      {showResetNotification && (
+        <Notification
+          icon={<FiCheckCircle size={20} />}
+          color="teal"
+          title="Success!"
+          onClose={() => setShowResetNotification(false)}
+          style={{ 
+            marginBottom: '1rem',
+            backgroundColor: 'rgba(0, 255, 128, 0.2)',
+            borderColor: '#00FF80',
+            color: '#00FFFF'
+          }}
+        >
+          Your app usage data has been successfully reset.
+        </Notification>
+      )}
+      
       <Title
         order={1}
         style={{

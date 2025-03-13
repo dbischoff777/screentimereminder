@@ -135,13 +135,25 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
 
   // Reset daily usage stats
   const resetDailyUsage = () => {
-    setAppUsageData(prevData => 
-      prevData.map(app => ({
-        ...app,
-        time: 0,
-        isActive: false
-      }))
-    );
+    // Reset all app usage data to zero
+    const resetData = defaultAppCategories.map(app => ({
+      ...app,
+      time: 0,
+      isActive: false,
+      lastUsed: undefined
+    }));
+    
+    // Update state with reset data
+    setAppUsageData(resetData);
+    
+    // Explicitly save to localStorage to ensure persistence
+    localStorage.setItem('appUsageData', JSON.stringify(resetData));
+    
+    // Reset active app tracking
+    setActiveApp(null);
+    setTrackingStartTime(null);
+    
+    console.log('App usage data has been reset');
   };
 
   // Start tracking an app

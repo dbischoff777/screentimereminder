@@ -1,4 +1,4 @@
-import { Container, Title, NumberInput, Button, Text, Switch, Group } from '@mantine/core';
+import { Container, Title, NumberInput, Button, Text, Switch, Group, Modal } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect } from 'react';
@@ -20,11 +20,13 @@ const Settings = () => {
     notificationsEnabled, 
     setNotificationsEnabled, 
     notificationFrequency, 
-    setNotificationFrequency
+    setNotificationFrequency,
+    resetDailyUsage
   } = useScreenTime();
   
   const [isMobile, setIsMobile] = useState(false);
   const [previousNotificationState, setPreviousNotificationState] = useState(notificationsEnabled);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
 
   // Check if running on mobile
   useEffect(() => {
@@ -46,6 +48,14 @@ const Settings = () => {
     if (notificationsEnabled && !isMobile && Notification.permission !== 'granted') {
       navigate('/notification-permission');
     }
+  };
+
+  const handleResetUsage = () => {
+    resetDailyUsage();
+    setResetModalOpen(false);
+    
+    // Navigate to Statistics page to show the reset data
+    navigate('/statistics', { state: { fromReset: true } });
   };
 
   // Frequency options
@@ -191,6 +201,80 @@ const Settings = () => {
           SAVE SETTINGS
         </Button>
       </div>
+
+      {/* Data Management Section */}
+      <div
+        style={{
+          padding: '2rem',
+          background: 'transparent',
+          borderTop: '1px solid #FF00FF',
+          borderBottom: '1px solid #FF00FF',
+          marginBottom: '2rem',
+        }}
+      >
+        <Title
+          order={3}
+          style={{
+            color: '#FF00FF',
+            marginBottom: '1.5rem',
+            textShadow: '0 0 5px #FF00FF',
+          }}
+        >
+          Data Management
+        </Title>
+
+        <Text style={{ color: '#00FFFF', marginBottom: '1.5rem' }}>
+          Reset your daily app usage data to start fresh. This action cannot be undone.
+        </Text>
+
+        <Button
+          fullWidth
+          size="lg"
+          color="red"
+          onClick={() => setResetModalOpen(true)}
+          style={{
+            backgroundColor: 'rgba(255, 0, 0, 0.7)',
+            color: 'white',
+          }}
+        >
+          RESET DAILY USAGE DATA
+        </Button>
+      </div>
+
+      {/* Reset Confirmation Modal */}
+      <Modal
+        opened={resetModalOpen}
+        onClose={() => setResetModalOpen(false)}
+        title="Reset Daily Usage Data"
+        styles={{
+          title: { color: '#FF00FF', fontWeight: 'bold' },
+          body: { backgroundColor: '#000030' },
+          header: { backgroundColor: '#000030' },
+          close: { color: '#00FFFF' },
+        }}
+        overlayProps={{ opacity: 0.7, blur: 3 }}
+      >
+        <Text style={{ color: '#FFFFFF', marginBottom: '1.5rem' }}>
+          Are you sure you want to reset your daily app usage data? This action cannot be undone.
+        </Text>
+        <Group style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <Button
+            variant="outline"
+            color="cyan"
+            onClick={() => setResetModalOpen(false)}
+            style={{ borderColor: '#00FFFF', color: '#00FFFF' }}
+          >
+            CANCEL
+          </Button>
+          <Button
+            color="red"
+            onClick={handleResetUsage}
+            style={{ backgroundColor: 'rgba(255, 0, 0, 0.7)' }}
+          >
+            RESET DATA
+          </Button>
+        </Group>
+      </Modal>
     </Container>
   );
 };
