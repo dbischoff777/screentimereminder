@@ -28,7 +28,6 @@ const Settings = () => {
     resetDailyUsage
   } = useScreenTime();
   
-  const [isMobile, setIsMobile] = useState(false);
   const [previousNotificationState, setPreviousNotificationState] = useState(notificationsEnabled);
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [previousUsageAccessState, setPreviousUsageAccessState] = useState(usageAccessEnabled);
@@ -41,12 +40,11 @@ const Settings = () => {
 
   // Check if running on mobile and initialize permission states
   useEffect(() => {
-    // Simple check for mobile - can be enhanced
-    setIsMobile(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
+    // Initialize permission states
     setPreviousNotificationState(notificationsEnabled);
     setPreviousUsageAccessState(usageAccessEnabled);
     
-    // Check usage access permission status
+    // Check usage access permission
     checkUsagePermission();
   }, [notificationsEnabled, usageAccessEnabled, setUsageAccessEnabled]);
 
@@ -110,23 +108,45 @@ const Settings = () => {
     console.log('Modal state changed:', resetModalOpen);
   }, [resetModalOpen]);
 
-  const handleSaveSettings = () => {
-    // Handle notification permissions
-    if ((notificationsEnabled && !previousNotificationState) || 
-        (isMobile && notificationsEnabled && Notification.permission !== 'granted')) {
-      navigate('/notification-permission');
-      return;
+  const handleSaveSettings = async () => {
+    console.log('Save Settings clicked. Notification state:', notificationsEnabled, 'Previous state:', previousNotificationState);
+    
+    // Handle notification permissions for mobile devices
+    if (notificationsEnabled) {
+      try {
+        // For mobile devices, we need to use Capacitor's LocalNotifications API
+        if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+          console.log('Mobile device detected, checking notification permission with Capacitor');
+          const { LocalNotifications } = await import('@capacitor/local-notifications');
+          
+          // Check if we need to request permission
+          const permResult = await LocalNotifications.checkPermissions();
+          console.log('Current notification permission status:', permResult.display);
+          
+          if (permResult.display !== 'granted' || !previousNotificationState) {
+            console.log('Navigating to notification permission page');
+            navigate('/notification-permission');
+            return;
+          }
+        } else {
+          // Fallback for browser testing
+          if (!previousNotificationState || (Notification && Notification.permission !== 'granted')) {
+            console.log('Navigating to notification permission page (browser fallback)');
+            navigate('/notification-permission');
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('Error checking notification permissions:', error);
+        // If there's an error, navigate to permission page to be safe
+        navigate('/notification-permission');
+        return;
+      }
     }
     
     // Handle usage access permissions
     if (usageAccessEnabled && !previousUsageAccessState) {
       requestUsagePermission();
-      return;
-    }
-    
-    // For desktop browsers, check notification permission status
-    if (notificationsEnabled && !isMobile && Notification.permission !== 'granted') {
-      navigate('/notification-permission');
       return;
     }
     
@@ -260,7 +280,10 @@ const Settings = () => {
           </Text>
           <Switch 
             checked={notificationsEnabled}
-            onChange={(event) => setNotificationsEnabled(event.currentTarget.checked)}
+            onChange={(event) => {
+              setNotificationsEnabled(event.currentTarget.checked);
+              // Remove immediate navigation - let the Save Settings button handle this
+            }}
             color="cyan"
             styles={{
               track: {

@@ -1,8 +1,8 @@
-import { Container, Title, Text, Grid, RingProgress, Badge, Notification, Loader, Button } from '@mantine/core';
+import { Container, Title, Text, Grid, RingProgress, Badge, Notification, Loader } from '@mantine/core';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect, useRef } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { FiCheckCircle, FiRefreshCw } from 'react-icons/fi';
 
 const Statistics = () => {
@@ -13,11 +13,9 @@ const Statistics = () => {
   const [isPulling, setIsPulling] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const startY = useRef<number | null>(null);
   const location = useLocation();
-  const navigate = useNavigate();
   
   // Check if we're coming from the settings page after a reset
   useEffect(() => {
@@ -178,11 +176,9 @@ const Statistics = () => {
         const AppUsageTrackerService = (await import('../services/AppUsageTracker')).default;
         const tracker = AppUsageTrackerService.getInstance();
         const permissionStatus = await tracker.hasUsagePermission();
-        setHasPermission(permissionStatus);
         console.log('Statistics: Permission status =', permissionStatus);
       } catch (error) {
         console.error('Error checking permission:', error);
-        setHasPermission(false);
       }
     };
     

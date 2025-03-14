@@ -18,80 +18,128 @@ const NotificationPermission = () => {
 
   // Request permission automatically when component mounts
   useEffect(() => {
-    // Check current permission status on component mount
-    if ('Notification' in window) {
-      setPermissionStatus(Notification.permission as 'default' | 'granted' | 'denied');
-    }
+    const checkPermission = async () => {
+      try {
+        // For mobile devices, use Capacitor
+        if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+          const { LocalNotifications } = await import('@capacitor/local-notifications');
+          const permResult = await LocalNotifications.checkPermissions();
+          console.log('Initial permission check (Capacitor):', permResult.display);
+          setPermissionStatus(permResult.display as 'default' | 'granted' | 'denied');
+        } 
+        // Fallback for browser testing
+        else if ('Notification' in window) {
+          console.log('Initial permission check (Browser):', Notification.permission);
+          setPermissionStatus(Notification.permission as 'default' | 'granted' | 'denied');
+        }
+      } catch (error) {
+        console.error('Error checking initial permission:', error);
+      }
+    };
 
+    checkPermission();
+    
     // Auto-trigger permission request after a short delay
     const timer = setTimeout(() => {
       requestPermission();
-    }, 500);
+    }, 1000); // Increased delay to ensure UI is fully loaded
+    
     return () => clearTimeout(timer);
   }, []);
 
   const requestPermission = async () => {
+    console.log('Requesting notification permission...');
     try {
-      // Try to use the Capacitor Notifications API if available
+      // For mobile devices, use Capacitor
       if (window.Capacitor && window.Capacitor.isNativePlatform()) {
-        // This will be executed when running on a real device with Capacitor
+        console.log('Using Capacitor LocalNotifications API');
         const { LocalNotifications } = await import('@capacitor/local-notifications');
         
         try {
           // Request permission
+          console.log('Calling LocalNotifications.requestPermissions()');
           const { display } = await LocalNotifications.requestPermissions();
+          console.log('Permission result from Capacitor:', display);
           
           if (display === 'granted') {
             setPermissionStatus('granted');
+            console.log('Permission granted, scheduling test notification');
             
-            // Show a test notification
-            await LocalNotifications.schedule({
-              notifications: [
-                {
-                  title: 'Screen Time Reminder Notification',
-                  body: 'Notifications are now enabled for Screen Time Reminder!',
-                  id: 1,
-                  schedule: { at: new Date(Date.now() + 1000) }
-                }
-              ]
-            });
-            
-            // Removed automatic redirection
+            // Show a test notification with a slight delay
+            setTimeout(async () => {
+              try {
+                await LocalNotifications.schedule({
+                  notifications: [
+                    {
+                      title: 'Screen Time Reminder',
+                      body: 'Notifications are now enabled!',
+                      id: 1,
+                      schedule: { at: new Date(Date.now() + 1000) }
+                    }
+                  ]
+                });
+                console.log('Test notification scheduled successfully');
+              } catch (notifError) {
+                console.error('Error scheduling test notification:', notifError);
+              }
+            }, 1500);
           } else {
-            setPermissionStatus('denied');
+            console.log('Permission denied or not determined:', display);
+            setPermissionStatus(display as 'default' | 'granted' | 'denied');
           }
         } catch (permError) {
           console.error('Error requesting notification permissions:', permError);
-          // For emulators, we'll simulate permission granted
-          setPermissionStatus('granted');
-          // Removed automatic redirection
+          // Check permission status after error
+          try {
+            const currentStatus = await LocalNotifications.checkPermissions();
+            console.log('Permission status after error:', currentStatus.display);
+            setPermissionStatus(currentStatus.display as 'default' | 'granted' | 'denied');
+          } catch (checkError) {
+            console.error('Error checking permissions after error:', checkError);
+          }
         }
-      } else {
-        // Fallback for web or emulator
-        if ('Notification' in window) {
+      } 
+      // Fallback for browser testing
+      else if ('Notification' in window) {
+        console.log('Using Web Notification API (for testing only)');
+        console.log('Current permission status:', Notification.permission);
+        
+        if (Notification.permission !== 'granted') {
+          console.log('Calling Notification.requestPermission()');
           const permission = await Notification.requestPermission();
+          console.log('New permission status:', permission);
           setPermissionStatus(permission);
 
           if (permission === 'granted') {
-            // Show a test notification
-            new Notification('Screen Time Reminder Notification', {
-              body: 'Notifications are now enabled for Screen Time Reminder!',
+            console.log('Permission granted, showing test notification');
+            new Notification('Screen Time Reminder', {
+              body: 'Notifications are now enabled!',
               icon: '/notification-icon.png'
             });
           }
         } else {
-          // For emulators without notification support
-          console.log('Emulator detected, simulating notification permission');
+          console.log('Permission already granted');
           setPermissionStatus('granted');
         }
-        
-        // Removed automatic redirection
+      } else {
+        console.log('No notification API available, simulating granted permission');
+        setPermissionStatus('granted');
       }
     } catch (error) {
-      console.error('Error requesting notification permission:', error);
-      // For emulators, we'll simulate permission granted
-      setPermissionStatus('granted');
-      // Removed automatic redirection
+      console.error('Critical error in requestPermission:', error);
+      // Try to recover by checking current status
+      try {
+        if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+          const { LocalNotifications } = await import('@capacitor/local-notifications');
+          const currentStatus = await LocalNotifications.checkPermissions();
+          console.log('Permission status after critical error:', currentStatus.display);
+          setPermissionStatus(currentStatus.display as 'default' | 'granted' | 'denied');
+        }
+      } catch (recoveryError) {
+        console.error('Error during recovery attempt:', recoveryError);
+        // Last resort - assume default
+        setPermissionStatus('default');
+      }
     }
   };
 
