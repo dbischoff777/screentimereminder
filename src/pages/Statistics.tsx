@@ -101,32 +101,59 @@ const Statistics = () => {
     };
   }, [pullDistance]);
   
-  const refreshData = () => {
+  const refreshData = async () => {
     console.log('Refreshing data...');
     
     // Show loading state
     setIsRefreshing(true);
     
     try {
-      // Force reload data from localStorage
-      const savedData = localStorage.getItem('appUsageData');
-      console.log('Data from localStorage:', savedData ? 'Found' : 'Not found');
+      // Get the AppUsageTracker service
+      const AppUsageTrackerService = (await import('../services/AppUsageTracker')).default;
+      const tracker = AppUsageTrackerService.getInstance();
       
-      // Force re-fetch data from context
-      const total = getTotalScreenTime();
-      console.log('Total screen time:', total);
-      setTotalScreenTime(total);
+      // Check if we have permission to access usage data
+      const hasPermission = await tracker.hasUsagePermission();
+      console.log('Permission to access usage data:', hasPermission);
       
-      // Calculate percentage of limit
-      const percent = (total / screenTimeLimit) * 100;
-      setPercentOfLimit(Math.min(percent, 100));
-      
-      // Simulate a short delay to show loading state
-      setTimeout(() => {
-        // Hide loading state
-        setIsRefreshing(false);
+      if (hasPermission) {
+        // Fetch the latest app usage data from Android
+        console.log('Fetching latest app usage data from Android...');
+        const now = Date.now();
+        const startOfDay = new Date().setHours(0, 0, 0, 0);
         
-        // Log refresh for debugging
+        // Get app usage data for today
+        const latestData = await tracker.getAppUsageData(startOfDay, now);
+        console.log(`Received ${latestData.length} app usage records from Android`);
+        
+        // Force re-fetch data from context
+        const total = getTotalScreenTime();
+        console.log('Total screen time:', total);
+        setTotalScreenTime(total);
+        
+        // Calculate percentage of limit
+        const percent = (total / screenTimeLimit) * 100;
+        setPercentOfLimit(Math.min(percent, 100));
+      } else {
+        console.log('No permission to access usage data, using cached data');
+        
+        // Force reload data from localStorage
+        const savedData = localStorage.getItem('appUsageData');
+        console.log('Data from localStorage:', savedData ? 'Found' : 'Not found');
+        
+        // Force re-fetch data from context
+        const total = getTotalScreenTime();
+        console.log('Total screen time:', total);
+        setTotalScreenTime(total);
+        
+        // Calculate percentage of limit
+        const percent = (total / screenTimeLimit) * 100;
+        setPercentOfLimit(Math.min(percent, 100));
+      }
+      
+      // Hide loading state after a short delay to show the refresh animation
+      setTimeout(() => {
+        setIsRefreshing(false);
         console.log('Statistics data refreshed successfully');
       }, 500);
     } catch (error) {
