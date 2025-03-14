@@ -1,4 +1,4 @@
-import { Container, Title, NumberInput, Button, Text, Switch, Group, Modal, Loader, ThemeIcon } from '@mantine/core';
+import { Container, Title, NumberInput, Button, Text, Switch, Group, Modal, Loader } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect } from 'react';

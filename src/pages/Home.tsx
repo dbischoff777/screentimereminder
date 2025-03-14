@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Container, Title, Text, Button, Box, Group } from '@mantine/core';
+import { Container, Title, Text, Button, Box, Group, Divider } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import AppUsageTracker from '../services/AppUsageTracker';
+import { FiBarChart2, FiSettings } from 'react-icons/fi';
 
 // Welcome messages array
 const welcomeMessages = [
@@ -112,6 +113,42 @@ const Home = () => {
             Settings
           </Button>
         </Group>
+        
+        {/* Usage Access Permission Button */}
+        {hasUsagePermission === false && (
+          <Box mt="xl" style={{ marginTop: '2rem' }}>
+            <Divider 
+              my="md" 
+              label={
+                <Text size="sm" style={{ color: '#FF00FF' }}>
+                  <FiBarChart2 style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
+                  Enable Usage Access
+                </Text>
+              } 
+              labelPosition="center"
+              style={{ borderColor: '#FF00FF' }}
+            />
+            
+            <Text size="sm" style={{ color: '#f0f0f0', marginBottom: '1rem' }}>
+              To track your screen time and provide accurate statistics, 
+              the app needs permission to access usage data.
+            </Text>
+            
+            <Button
+              size="lg"
+              onClick={() => navigate('/settings')}
+              style={{
+                background: 'linear-gradient(45deg, #00FFFF, #FF00FF)',
+                color: '#000',
+                fontWeight: 'bold',
+              }}
+              fullWidth
+            >
+              <FiSettings style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} />
+              Enable Usage Access in Settings
+            </Button>
+          </Box>
+        )}
       </Box>
     </Container>
   );
