@@ -202,45 +202,6 @@ const Statistics = () => {
         overflowX: 'hidden'
       }}
     >
-      {/* Permission status indicator */}
-      <div style={{
-        position: 'absolute',
-        top: '10px',
-        left: '10px',
-        zIndex: 1000,
-        display: 'flex',
-        alignItems: 'center',
-        gap: '8px',
-        padding: '8px',
-        background: 'rgba(0, 0, 0, 0.5)',
-        borderRadius: '4px',
-        border: `1px solid ${hasPermission ? '#00FF00' : '#FF0000'}`
-      }}>
-        <div style={{
-          width: '12px',
-          height: '12px',
-          borderRadius: '50%',
-          backgroundColor: hasPermission ? '#00FF00' : '#FF0000'
-        }} />
-        <Text size="sm" style={{ color: '#FFFFFF' }}>
-          {hasPermission === null ? 'Checking permission...' : 
-           hasPermission ? 'Usage access granted' : 'Usage access denied'}
-        </Text>
-        
-        {/* Add debug button when permission is denied */}
-        {hasPermission === false && (
-          <Button
-            size="xs"
-            variant="filled"
-            color="orange"
-            style={{ marginLeft: '8px' }}
-            onClick={() => location.pathname !== '/permission-debug' && navigate('/permission-debug')}
-          >
-            Fix Permission
-          </Button>
-        )}
-      </div>
-
       {/* Pull to refresh indicator */}
       {isPulling && (
         <div 

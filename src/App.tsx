@@ -3,6 +3,7 @@ import { MantineProvider, Text, Button, Stack, Paper, Code } from '@mantine/core
 import { useState, useEffect } from 'react';
 import { ScreenTimeProvider } from './context/ScreenTimeContext';
 import PermissionDebug from './pages/PermissionDebug';
+import NotificationPermission from './pages/NotificationPermission';
 
 // Simple debug component to display when in debug mode
 const DebugMode = () => {
@@ -118,6 +119,7 @@ function App() {
           <Routes>
             <Route path="/" element={<DebugMode />} />
             <Route path="/permission-debug" element={<PermissionDebug />} />
+            <Route path="/notification-permission" element={<NotificationPermission />} />
           </Routes>
         </Router>
       </MantineProvider>
@@ -157,6 +159,7 @@ function App() {
               </div>
             } />
             <Route path="/permission-debug" element={<PermissionDebug />} />
+            <Route path="/notification-permission" element={<NotificationPermission />} />
           </Routes>
         </Router>
       </ScreenTimeProvider>

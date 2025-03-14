@@ -127,7 +127,13 @@ const Settings = () => {
     // For desktop browsers, check notification permission status
     if (notificationsEnabled && !isMobile && Notification.permission !== 'granted') {
       navigate('/notification-permission');
+      return;
     }
+    
+    // If we've made it here, all permissions are handled
+    // Show a success message or navigate back to home
+    alert('Settings saved successfully!');
+    navigate('/');
   };
 
   const handleResetUsage = () => {
