@@ -28,6 +28,9 @@ const config: CapacitorConfig = {
       sound: "beep.wav",
       smallIcon: "ic_stat_icon_config_sample",
       iconColor: "#FF00FF"
+    },
+    AppUsageTracker: {
+      enabled: true
     }
   },
   android: {

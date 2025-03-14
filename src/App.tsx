@@ -1,6 +1,8 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { MantineProvider, Text, Button, Stack, Paper, Code } from '@mantine/core';
 import { useState, useEffect } from 'react';
+import { ScreenTimeProvider } from './context/ScreenTimeContext';
+import PermissionDebug from './pages/PermissionDebug';
 
 // Simple debug component to display when in debug mode
 const DebugMode = () => {
@@ -92,6 +94,9 @@ const DebugMode = () => {
             <Button variant="outline" color="gray" onClick={clearLogs}>
               Clear Logs
             </Button>
+            <Button color="cyan" component="a" href="/permission-debug">
+              Permission Debug
+            </Button>
           </div>
         </Stack>
       </Paper>
@@ -99,7 +104,7 @@ const DebugMode = () => {
   );
 };
 
-// Minimal App component without ScreenTimeProvider to diagnose crashes
+// App component with ScreenTimeProvider and permission debug page
 function App() {
   // Check for debug mode in URL or localStorage
   const isDebugMode = window.location.search.includes('debug=true') || 
@@ -109,37 +114,52 @@ function App() {
   if (isDebugMode) {
     return (
       <MantineProvider theme={{ primaryColor: 'cyan' }}>
-        <DebugMode />
+        <Router>
+          <Routes>
+            <Route path="/" element={<DebugMode />} />
+            <Route path="/permission-debug" element={<PermissionDebug />} />
+          </Routes>
+        </Router>
       </MantineProvider>
     );
   }
   
-  // Otherwise render a minimal version of the app without ScreenTimeProvider
+  // Otherwise render the full app with ScreenTimeProvider
   return (
     <MantineProvider theme={{ primaryColor: 'cyan' }}>
-      <Router>
-        <Routes>
-          <Route path="/" element={
-            <div style={{ padding: 20 }}>
-              <Paper p="md" withBorder style={{ maxWidth: 500, margin: '0 auto' }}>
-                <Stack>
-                  <Text size="xl" fw={700}>Screen Time Reminder</Text>
-                  <Text>Minimal version for crash diagnosis</Text>
-                  <Button 
-                    color="cyan" 
-                    onClick={() => {
-                      localStorage.setItem('debug_mode', 'true');
-                      window.location.reload();
-                    }}
-                  >
-                    Enable Debug Mode
-                  </Button>
-                </Stack>
-              </Paper>
-            </div>
-          } />
-        </Routes>
-      </Router>
+      <ScreenTimeProvider>
+        <Router>
+          <Routes>
+            <Route path="/" element={
+              <div style={{ padding: 20 }}>
+                <Paper p="md" withBorder style={{ maxWidth: 500, margin: '0 auto' }}>
+                  <Stack>
+                    <Text size="xl" fw={700}>Screen Time Reminder</Text>
+                    <Text>Main app with ScreenTimeProvider</Text>
+                    <Button 
+                      color="cyan" 
+                      onClick={() => {
+                        localStorage.setItem('debug_mode', 'true');
+                        window.location.reload();
+                      }}
+                    >
+                      Enable Debug Mode
+                    </Button>
+                    <Button 
+                      color="blue" 
+                      component="a" 
+                      href="/permission-debug"
+                    >
+                      Permission Debug
+                    </Button>
+                  </Stack>
+                </Paper>
+              </div>
+            } />
+            <Route path="/permission-debug" element={<PermissionDebug />} />
+          </Routes>
+        </Router>
+      </ScreenTimeProvider>
     </MantineProvider>
   );
 }

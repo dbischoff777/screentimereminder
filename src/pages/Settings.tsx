@@ -1,7 +1,9 @@
-import { Container, Title, NumberInput, Button, Text, Switch, Group, Modal } from '@mantine/core';
+import { Container, Title, NumberInput, Button, Text, Switch, Group, Modal, Loader, ThemeIcon } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect } from 'react';
+import AppUsageTracker from '../services/AppUsageTracker';
+import { FiAlertCircle, FiCheckCircle, FiBarChart2 } from 'react-icons/fi';
 
 // Add type declaration for Capacitor on window object if not already defined
 declare global {
@@ -21,19 +23,87 @@ const Settings = () => {
     setNotificationsEnabled, 
     notificationFrequency, 
     setNotificationFrequency,
+    usageAccessEnabled,
+    setUsageAccessEnabled,
     resetDailyUsage
   } = useScreenTime();
   
   const [isMobile, setIsMobile] = useState(false);
   const [previousNotificationState, setPreviousNotificationState] = useState(notificationsEnabled);
   const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [previousUsageAccessState, setPreviousUsageAccessState] = useState(usageAccessEnabled);
+  const [isCheckingPermission, setIsCheckingPermission] = useState(false);
+  const [isRequestingPermission, setIsRequestingPermission] = useState(false);
+  const [permissionStatus, setPermissionStatus] = useState<boolean | null>(null);
 
-  // Check if running on mobile
+  // Get the tracker service instance
+  const trackerService = AppUsageTracker.getInstance();
+
+  // Check if running on mobile and initialize permission states
   useEffect(() => {
     // Simple check for mobile - can be enhanced
     setIsMobile(/Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent));
     setPreviousNotificationState(notificationsEnabled);
-  }, [notificationsEnabled]);
+    setPreviousUsageAccessState(usageAccessEnabled);
+    
+    // Check usage access permission status
+    checkUsagePermission();
+  }, [notificationsEnabled, usageAccessEnabled, setUsageAccessEnabled]);
+
+  // Set up an interval to check permission status periodically when requesting
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+    
+    if (isRequestingPermission) {
+      intervalId = setInterval(() => {
+        checkUsagePermission();
+      }, 3000); // Check every 3 seconds
+    }
+    
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isRequestingPermission]);
+
+  // Check usage access permission
+  const checkUsagePermission = async () => {
+    try {
+      setIsCheckingPermission(true);
+      const hasPermission = await trackerService.hasUsagePermission();
+      console.log('Usage access permission status:', hasPermission);
+      setPermissionStatus(hasPermission);
+      
+      // Only update if different from current state
+      if (hasPermission !== usageAccessEnabled) {
+        setUsageAccessEnabled(hasPermission);
+      }
+      
+      // If we were requesting permission and now have it, stop requesting
+      if (isRequestingPermission && hasPermission) {
+        setIsRequestingPermission(false);
+      }
+    } catch (error) {
+      console.error('Error checking usage access permission:', error);
+      setPermissionStatus(false);
+    } finally {
+      setIsCheckingPermission(false);
+    }
+  };
+
+  // Request usage access permission
+  const requestUsagePermission = async () => {
+    try {
+      setIsRequestingPermission(true);
+      console.log('Requesting usage access permission...');
+      await trackerService.requestUsagePermission();
+      console.log('Usage access permission request sent');
+      
+      // We'll check the permission status in the interval
+    } catch (error) {
+      console.error('Error requesting usage access permission:', error);
+      setIsRequestingPermission(false);
+    }
+  };
 
   // Log modal state changes
   useEffect(() => {
@@ -41,15 +111,20 @@ const Settings = () => {
   }, [resetModalOpen]);
 
   const handleSaveSettings = () => {
-    // If notifications were just enabled or we're on mobile and notifications are enabled,
-    // always navigate to the permission page
+    // Handle notification permissions
     if ((notificationsEnabled && !previousNotificationState) || 
-        (isMobile && notificationsEnabled)) {
+        (isMobile && notificationsEnabled && Notification.permission !== 'granted')) {
       navigate('/notification-permission');
       return;
     }
     
-    // For desktop browsers, check permission status
+    // Handle usage access permissions
+    if (usageAccessEnabled && !previousUsageAccessState) {
+      requestUsagePermission();
+      return;
+    }
+    
+    // For desktop browsers, check notification permission status
     if (notificationsEnabled && !isMobile && Notification.permission !== 'granted') {
       navigate('/notification-permission');
     }
@@ -189,6 +264,104 @@ const Settings = () => {
             }}
           />
         </Group>
+
+        {/* Usage Access Permission Section */}
+        <div style={{ marginBottom: '2rem' }}>
+          <Group style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <Text style={{ color: '#00FFFF' }}>
+              Enable Usage Access
+            </Text>
+            <Switch 
+              checked={usageAccessEnabled}
+              onChange={(event) => {
+                setUsageAccessEnabled(event.currentTarget.checked);
+                if (event.currentTarget.checked && !permissionStatus) {
+                  // If turning on and don't have permission, request it
+                  requestUsagePermission();
+                }
+              }}
+              color="cyan"
+              styles={{
+                track: {
+                  backgroundColor: usageAccessEnabled ? 'rgba(0, 255, 255, 0.5)' : 'rgba(100, 100, 100, 0.3)',
+                  borderColor: usageAccessEnabled ? '#00FFFF' : '#666666',
+                }
+              }}
+            />
+          </Group>
+          
+          {/* Permission Status Indicator */}
+          {isCheckingPermission && (
+            <div style={{ textAlign: 'center', margin: '1rem 0' }}>
+              <Loader color="#00FFFF" size="sm" />
+              <Text size="sm" style={{ color: '#00FFFF', marginTop: '0.5rem' }}>
+                Checking permission status...
+              </Text>
+            </div>
+          )}
+          
+          {isRequestingPermission && !isCheckingPermission && (
+            <div style={{ textAlign: 'center', margin: '1rem 0' }}>
+              <Loader color="#FF00FF" size="sm" />
+              <Text size="sm" style={{ color: '#FF00FF', marginTop: '0.5rem' }}>
+                Waiting for permission to be granted...
+              </Text>
+              <Text size="xs" style={{ color: '#f0f0f0', marginTop: '0.5rem' }}>
+                When the settings page opens, find "Screen Time Reminder" in the list and toggle it ON.
+                Then return to this app.
+              </Text>
+            </div>
+          )}
+          
+          {permissionStatus === true && !isCheckingPermission && !isRequestingPermission && (
+            <div
+              style={{
+                padding: '0.5rem',
+                background: 'rgba(0, 255, 0, 0.1)',
+                borderLeft: '4px solid #00FF00',
+                marginTop: '0.5rem',
+              }}
+            >
+              <Text size="sm" style={{ color: '#00FF00' }}>
+                <FiCheckCircle style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
+                Usage access permission granted
+              </Text>
+            </div>
+          )}
+          
+          {permissionStatus === false && usageAccessEnabled && !isCheckingPermission && !isRequestingPermission && (
+            <div
+              style={{
+                padding: '0.5rem',
+                background: 'rgba(255, 0, 0, 0.1)',
+                borderLeft: '4px solid #FF0000',
+                marginTop: '0.5rem',
+              }}
+            >
+              <Text size="sm" style={{ color: '#FF0000' }}>
+                <FiAlertCircle style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
+                Permission not granted
+              </Text>
+              <Button
+                size="xs"
+                onClick={requestUsagePermission}
+                style={{
+                  marginTop: '0.5rem',
+                  background: 'linear-gradient(45deg, #FF00FF, #00FFFF)',
+                }}
+              >
+                Request Permission
+              </Button>
+            </div>
+          )}
+          
+          {usageAccessEnabled && (
+            <Text size="xs" style={{ color: '#f0f0f0', marginTop: '0.5rem' }}>
+              <FiBarChart2 style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} color="#FF00FF" />
+              Usage access allows the app to track your screen time and provide accurate statistics.
+            </Text>
+          )}
+        </div>
 
         {notificationsEnabled && (
           <>

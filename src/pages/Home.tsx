@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Container, Title, Text, Button, Box } from '@mantine/core';
+import { Container, Title, Text, Button, Box, Group } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
+import { useScreenTime } from '../context/ScreenTimeContext';
+import AppUsageTracker from '../services/AppUsageTracker';
 
 // Welcome messages array
 const welcomeMessages = [
@@ -14,12 +16,31 @@ const welcomeMessages = [
 const Home = () => {
   const navigate = useNavigate();
   const [welcomeMessage, setWelcomeMessage] = useState('');
+  const [hasUsagePermission, setHasUsagePermission] = useState<boolean | null>(null);
+  const { usageAccessEnabled } = useScreenTime();
+  
+  // Get the tracker service instance
+  const trackerService = AppUsageTracker.getInstance();
 
   useEffect(() => {
     // Select a random welcome message
     const randomIndex = Math.floor(Math.random() * welcomeMessages.length);
     setWelcomeMessage(welcomeMessages[randomIndex]);
-  }, []);
+    
+    // Check usage access permission status
+    const checkUsagePermission = async () => {
+      try {
+        const hasPermission = await trackerService.hasUsagePermission();
+        console.log('Home: Usage access permission status:', hasPermission);
+        setHasUsagePermission(hasPermission);
+      } catch (error) {
+        console.error('Home: Error checking usage access permission:', error);
+        setHasUsagePermission(false);
+      }
+    };
+    
+    checkUsagePermission();
+  }, [usageAccessEnabled]);
 
   return (
     <Container 
@@ -66,30 +87,31 @@ const Home = () => {
           {welcomeMessage}
         </Text>
 
-        <Button
-          size="lg"
-          onClick={() => navigate('/statistics')}
-          style={{
-            marginTop: '1rem',
-            background: 'linear-gradient(45deg, #FF00FF, #00FFFF)',
-          }}
-        >
-          View Your Stats
-        </Button>
-        
-        <Button
-          size="lg"
-          onClick={() => navigate('/settings')}
-          variant="outline"
-          style={{
-            marginTop: '1rem',
-            marginLeft: '1rem',
-            borderColor: '#00FFFF',
-            color: '#00FFFF',
-          }}
-        >
-          Settings
-        </Button>
+        <Group style={{ justifyContent: 'center', gap: '16px' }}>
+          <Button
+            size="lg"
+            onClick={() => navigate('/statistics')}
+            style={{
+              marginTop: '1rem',
+              background: 'linear-gradient(45deg, #FF00FF, #00FFFF)',
+            }}
+          >
+            View Your Stats
+          </Button>
+          
+          <Button
+            size="lg"
+            onClick={() => navigate('/settings')}
+            variant="outline"
+            style={{
+              marginTop: '1rem',
+              borderColor: '#00FFFF',
+              color: '#00FFFF',
+            }}
+          >
+            Settings
+          </Button>
+        </Group>
       </Box>
     </Container>
   );

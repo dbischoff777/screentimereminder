@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import BackgroundService from '../services/BackgroundService';
+import AppUsageTrackerService, { AppUsage as TrackerAppUsage } from '../services/AppUsageTracker';
 
 // Add type declaration for Capacitor on window object
 declare global {
@@ -27,12 +28,20 @@ interface ScreenTimeContextType {
   setNotificationsEnabled: (enabled: boolean) => void;
   notificationFrequency: number;
   setNotificationFrequency: (frequency: number) => void;
+  // Usage access permission
+  usageAccessEnabled: boolean;
+  setUsageAccessEnabled: (enabled: boolean) => void;
   // App tracking functionality
   appUsageData: AppUsage[];
   getTotalScreenTime: () => number;
   startTrackingApp: (appName: string, category: string) => void;
   stopTrackingApp: (appName: string) => void;
   resetDailyUsage: () => void;
+  // App usage data retrieval
+  getAppUsageData: (startTime?: number, endTime?: number) => Promise<TrackerAppUsage[]>;
+  getLastHourUsage: () => Promise<TrackerAppUsage[]>;
+  // Test data function
+  addTestAppUsage: () => void;
 }
 
 const ScreenTimeContext = createContext<ScreenTimeContextType | undefined>(undefined);
@@ -70,6 +79,12 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     return saved ? parseInt(saved, 10) : 15; // Default 15 minutes
   });
 
+  // Usage access permission setting
+  const [usageAccessEnabled, setUsageAccessEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem('usageAccessEnabled');
+    return saved ? saved === 'true' : false;
+  });
+
   // App tracking state
   const [appUsageData, setAppUsageData] = useState<AppUsage[]>(() => {
     const saved = localStorage.getItem('appUsageData');
@@ -92,6 +107,10 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
   useEffect(() => {
     localStorage.setItem('notificationFrequency', notificationFrequency.toString());
   }, [notificationFrequency]);
+
+  useEffect(() => {
+    localStorage.setItem('usageAccessEnabled', usageAccessEnabled.toString());
+  }, [usageAccessEnabled]);
 
   useEffect(() => {
     localStorage.setItem('appUsageData', JSON.stringify(appUsageData));
@@ -542,6 +561,86 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     return () => clearInterval(limitCheckInterval);
   }, [appUsageData, screenTimeLimit, notificationsEnabled, notificationFrequency]);
 
+  // Get app usage data for a specific time range
+  const getAppUsageData = async (startTime?: number, endTime?: number): Promise<TrackerAppUsage[]> => {
+    try {
+      const appUsageTracker = AppUsageTrackerService.getInstance();
+      return await appUsageTracker.getAppUsageData(startTime, endTime);
+    } catch (error) {
+      console.error('Error getting app usage data:', error);
+      return [];
+    }
+  };
+
+  // Get app usage data for the last hour
+  const getLastHourUsage = async (): Promise<TrackerAppUsage[]> => {
+    try {
+      const appUsageTracker = AppUsageTrackerService.getInstance();
+      return await appUsageTracker.getLastHourUsage();
+    } catch (error) {
+      console.error('Error getting last hour usage:', error);
+      return [];
+    }
+  };
+
+  // Add test app usage data for debugging
+  const addTestAppUsage = () => {
+    console.log('Adding test app usage data');
+    
+    // Create test data for common apps
+    const testApps: AppUsage[] = [
+      {
+        name: 'Duolingo',
+        time: 15, // 15 minutes
+        color: getCategoryColor('Education'),
+        category: 'Education',
+        lastUsed: new Date(),
+        isActive: false
+      },
+      {
+        name: 'YouTube',
+        time: 45, // 45 minutes
+        color: getCategoryColor('Entertainment'),
+        category: 'Entertainment',
+        lastUsed: new Date(Date.now() - 30 * 60 * 1000), // 30 minutes ago
+        isActive: false
+      },
+      {
+        name: 'Instagram',
+        time: 30, // 30 minutes
+        color: getCategoryColor('Social Media'),
+        category: 'Social Media',
+        lastUsed: new Date(Date.now() - 60 * 60 * 1000), // 1 hour ago
+        isActive: false
+      }
+    ];
+    
+    // Merge with existing data or replace if same app exists
+    const updatedData = [...appUsageData];
+    
+    testApps.forEach(testApp => {
+      const existingAppIndex = updatedData.findIndex(app => app.name === testApp.name);
+      
+      if (existingAppIndex >= 0) {
+        // Update existing app
+        updatedData[existingAppIndex] = {
+          ...updatedData[existingAppIndex],
+          time: updatedData[existingAppIndex].time + testApp.time,
+          lastUsed: testApp.lastUsed
+        };
+      } else {
+        // Add new app
+        updatedData.push(testApp);
+      }
+    });
+    
+    // Update state and localStorage
+    setAppUsageData(updatedData);
+    localStorage.setItem('appUsageData', JSON.stringify(updatedData));
+    
+    console.log('Test app usage data added successfully');
+  };
+
   return (
     <ScreenTimeContext.Provider
       value={{
@@ -551,11 +650,16 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
         setNotificationsEnabled,
         notificationFrequency,
         setNotificationFrequency,
+        usageAccessEnabled,
+        setUsageAccessEnabled,
         appUsageData,
         getTotalScreenTime,
         startTrackingApp,
         stopTrackingApp,
-        resetDailyUsage
+        resetDailyUsage,
+        getAppUsageData,
+        getLastHourUsage,
+        addTestAppUsage
       }}
     >
       {children}

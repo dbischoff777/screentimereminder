@@ -1,21 +1,26 @@
-import { Container, Title, Text, Grid, RingProgress, Badge, Notification, Loader } from '@mantine/core';
+import { Container, Title, Text, Grid, RingProgress, Badge, Notification, Loader, Button, Group } from '@mantine/core';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { FiCheckCircle, FiRefreshCw } from 'react-icons/fi';
 
 const Statistics = () => {
-  const { appUsageData, getTotalScreenTime, screenTimeLimit } = useScreenTime();
+  const { appUsageData, getTotalScreenTime, screenTimeLimit, getLastHourUsage } = useScreenTime();
   const [totalScreenTime, setTotalScreenTime] = useState(0);
   const [percentOfLimit, setPercentOfLimit] = useState(0);
   const [showResetNotification, setShowResetNotification] = useState(false);
   const [isPulling, setIsPulling] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [debugData, setDebugData] = useState<any[]>([]);
+  const [showDebug, setShowDebug] = useState(false);
+  const [showRefreshNotification, setShowRefreshNotification] = useState(false);
+  const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const startY = useRef<number | null>(null);
   const location = useLocation();
+  const navigate = useNavigate();
   
   // Check if we're coming from the settings page after a reset
   useEffect(() => {
@@ -135,6 +140,86 @@ const Statistics = () => {
     }
   };
 
+  // Debug function to fetch app usage data directly
+  const fetchDebugData = async () => {
+    try {
+      console.log('Fetching app usage data directly from system...');
+      setIsRefreshing(true);
+      
+      // Check permission first
+      const AppUsageTrackerService = (await import('../services/AppUsageTracker')).default;
+      const tracker = AppUsageTrackerService.getInstance();
+      const permissionStatus = await tracker.hasUsagePermission();
+      setHasPermission(permissionStatus);
+      
+      if (!permissionStatus) {
+        setIsRefreshing(false);
+        // Show permission request dialog
+        if (confirm(
+          "This app needs permission to access usage data to track screen time.\n\n" +
+          "You will be redirected to the system settings. Please enable 'Usage access' for this app.\n\n" +
+          "Click OK to continue."
+        )) {
+          await tracker.requestUsagePermission();
+          alert(
+            "Please enable usage access for this app in the settings page that just opened.\n\n" +
+            "After enabling, return to this app and tap the 'Load Usage Data' button to load your usage data."
+          );
+        }
+        return;
+      }
+      
+      // Get last hour usage data directly from the native layer
+      const lastHourData = await getLastHourUsage();
+      console.log('Last hour usage data:', lastHourData);
+      
+      if (lastHourData && lastHourData.length > 0) {
+        // Set debug data
+        setDebugData(lastHourData);
+        
+        // Update app usage data in context
+        // This will update the main UI as well
+        const updatedData = [...appUsageData];
+        
+        lastHourData.forEach(app => {
+          const existingAppIndex = updatedData.findIndex(a => a.name === app.name);
+          
+          if (existingAppIndex >= 0) {
+            // Update existing app
+            updatedData[existingAppIndex] = {
+              ...updatedData[existingAppIndex],
+              time: app.time, // Replace with the most accurate data
+              lastUsed: app.lastUsed,
+              category: app.category,
+              color: app.color
+            };
+          } else {
+            // Add new app
+            updatedData.push(app);
+          }
+        });
+        
+        // Update localStorage with the new data
+        localStorage.setItem('appUsageData', JSON.stringify(updatedData));
+        
+        // Show notification
+        setShowRefreshNotification(true);
+        setTimeout(() => setShowRefreshNotification(false), 3000);
+        
+        setShowDebug(true);
+      } else {
+        // If no data, show a notification
+        alert('No app usage data found for the last hour. Please make sure you have granted usage access permission and have used some apps recently.');
+      }
+      
+      setIsRefreshing(false);
+    } catch (error: any) {
+      console.error('Error fetching debug data:', error);
+      alert('Error fetching app usage data: ' + (error.message || 'Unknown error'));
+      setIsRefreshing(false);
+    }
+  };
+
   // Sort apps by usage time (descending)
   const sortedApps = [...appUsageData].sort((a, b) => b.time - a.time);
   
@@ -169,6 +254,24 @@ const Statistics = () => {
     return 'Good';
   };
 
+  // Add permission check on component mount
+  useEffect(() => {
+    const checkPermission = async () => {
+      try {
+        const AppUsageTrackerService = (await import('../services/AppUsageTracker')).default;
+        const tracker = AppUsageTrackerService.getInstance();
+        const permissionStatus = await tracker.hasUsagePermission();
+        setHasPermission(permissionStatus);
+        console.log('Statistics: Permission status =', permissionStatus);
+      } catch (error) {
+        console.error('Error checking permission:', error);
+        setHasPermission(false);
+      }
+    };
+    
+    checkPermission();
+  }, []);
+
   return (
     <Container 
       ref={containerRef}
@@ -182,6 +285,45 @@ const Statistics = () => {
         overflowX: 'hidden'
       }}
     >
+      {/* Permission status indicator */}
+      <div style={{
+        position: 'absolute',
+        top: '10px',
+        left: '10px',
+        zIndex: 1000,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+        padding: '8px',
+        background: 'rgba(0, 0, 0, 0.5)',
+        borderRadius: '4px',
+        border: `1px solid ${hasPermission ? '#00FF00' : '#FF0000'}`
+      }}>
+        <div style={{
+          width: '12px',
+          height: '12px',
+          borderRadius: '50%',
+          backgroundColor: hasPermission ? '#00FF00' : '#FF0000'
+        }} />
+        <Text size="sm" style={{ color: '#FFFFFF' }}>
+          {hasPermission === null ? 'Checking permission...' : 
+           hasPermission ? 'Usage access granted' : 'Usage access denied'}
+        </Text>
+        
+        {/* Add debug button when permission is denied */}
+        {hasPermission === false && (
+          <Button
+            size="xs"
+            variant="filled"
+            color="orange"
+            style={{ marginLeft: '8px' }}
+            onClick={() => location.pathname !== '/permission-debug' && navigate('/permission-debug')}
+          >
+            Fix Permission
+          </Button>
+        )}
+      </div>
+
       {/* Pull to refresh indicator */}
       {isPulling && (
         <div 
@@ -280,6 +422,7 @@ const Statistics = () => {
           borderTop: '1px solid #FF00FF',
           borderBottom: '1px solid #FF00FF',
           marginBottom: '1.5rem',
+          marginTop: '40px' // Add margin to avoid overlap with permission indicator
         }}
       >
         <Grid>
@@ -547,6 +690,90 @@ const Statistics = () => {
           </div>
         )}
       </div>
+
+      {/* Debug buttons */}
+      <Group style={{ 
+        position: 'absolute', 
+        top: '10px', 
+        right: '10px',
+        zIndex: 1000,
+        display: 'flex',
+        gap: '8px',
+        justifyContent: 'flex-end'
+      }}>
+      </Group>
+
+      {/* Test data notification */}
+      {showRefreshNotification && (
+        <Notification
+          icon={<FiCheckCircle size={20} />}
+          color="teal"
+          title="Test Data Added"
+          onClose={() => setShowRefreshNotification(false)}
+          style={{
+            position: 'absolute',
+            top: '60px',
+            right: '10px',
+            zIndex: 1000,
+            maxWidth: '300px'
+          }}
+        >
+          Test app usage data has been added successfully.
+        </Notification>
+      )}
+
+      {/* Debug data display */}
+      {showDebug && debugData.length > 0 && (
+        <div style={{ 
+          marginTop: '20px', 
+          padding: '15px', 
+          background: 'rgba(0, 0, 0, 0.7)', 
+          border: '1px solid #FF00FF',
+          borderRadius: '8px'
+        }}>
+          <Title order={3} style={{ color: '#FF00FF', marginBottom: '10px' }}>System App Usage Data (Last Hour)</Title>
+          <Text size="sm" style={{ color: '#AAAAAA', marginBottom: '15px' }}>
+            This data comes directly from Android's Digital Wellbeing system and shows your actual app usage.
+          </Text>
+          {debugData.map((app, index) => (
+            <div key={index} style={{ 
+              marginBottom: '10px', 
+              padding: '8px', 
+              background: 'rgba(0, 0, 0, 0.5)',
+              borderLeft: `3px solid ${app.color || '#FFFFFF'}`
+            }}>
+              <Text style={{ color: '#FFFFFF' }}>
+                <strong>App:</strong> {app.name} | 
+                <strong> Time:</strong> {app.time.toFixed(2)} min | 
+                <strong> Category:</strong> {app.category}
+              </Text>
+              <Text size="xs" style={{ color: '#AAAAAA' }}>
+                <strong>Last Used:</strong> {app.lastUsed ? new Date(app.lastUsed).toLocaleTimeString() : 'N/A'}
+              </Text>
+            </div>
+          ))}
+          <Group style={{ marginTop: '10px', justifyContent: 'space-between' }}>
+            <Button 
+              size="sm" 
+              variant="outline" 
+              color="gray" 
+              onClick={() => setShowDebug(false)}
+              style={{ borderColor: '#AAAAAA' }}
+            >
+              Hide Debug
+            </Button>
+            <Button
+              size="sm"
+              variant="filled"
+              color="teal"
+              onClick={fetchDebugData}
+              style={{ backgroundColor: '#00FFAA' }}
+            >
+              Refresh Data
+            </Button>
+          </Group>
+        </div>
+      )}
     </Container>
   );
 };

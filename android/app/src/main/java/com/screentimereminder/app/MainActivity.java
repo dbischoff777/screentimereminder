@@ -16,8 +16,12 @@ public class MainActivity extends BridgeActivity {
             try {
                 this.registerPlugin(BackgroundModePlugin.class);
                 Log.d(TAG, "BackgroundModePlugin registered successfully");
+                
+                // Register the AppUsageTracker plugin
+                this.registerPlugin(AppUsageTracker.class);
+                Log.d(TAG, "AppUsageTracker plugin registered successfully");
             } catch (Exception e) {
-                Log.e(TAG, "Error registering BackgroundModePlugin", e);
+                Log.e(TAG, "Error registering plugins", e);
             }
             
             try {
