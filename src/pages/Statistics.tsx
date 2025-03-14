@@ -6,7 +6,7 @@ import { useLocation } from 'react-router-dom';
 import { FiCheckCircle, FiRefreshCw } from 'react-icons/fi';
 
 const Statistics = () => {
-  const { appUsageData, getTotalScreenTime, screenTimeLimit } = useScreenTime();
+  const { appUsageData, getTotalScreenTime, screenTimeLimit, getLastHourUsage } = useScreenTime();
   const [totalScreenTime, setTotalScreenTime] = useState(0);
   const [percentOfLimit, setPercentOfLimit] = useState(0);
   const [showResetNotification, setShowResetNotification] = useState(false);
@@ -119,21 +119,59 @@ const Statistics = () => {
       if (hasPermission) {
         // Fetch the latest app usage data from Android
         console.log('Fetching latest app usage data from Android...');
-        const now = Date.now();
-        const startOfDay = new Date().setHours(0, 0, 0, 0);
         
-        // Get app usage data for today
-        const latestData = await tracker.getAppUsageData(startOfDay, now);
-        console.log(`Received ${latestData.length} app usage records from Android`);
+        // Get last hour usage data directly from the native layer
+        const lastHourData = await getLastHourUsage();
+        console.log('Last hour usage data:', lastHourData);
         
-        // Force re-fetch data from context
-        const total = getTotalScreenTime();
-        console.log('Total screen time:', total);
-        setTotalScreenTime(total);
-        
-        // Calculate percentage of limit
-        const percent = (total / screenTimeLimit) * 100;
-        setPercentOfLimit(Math.min(percent, 100));
+        if (lastHourData && lastHourData.length > 0) {
+          // Update app usage data in context
+          // This will update the main UI as well
+          const updatedData = [...appUsageData];
+          
+          lastHourData.forEach(app => {
+            const existingAppIndex = updatedData.findIndex(a => a.name === app.name);
+            
+            if (existingAppIndex >= 0) {
+              // Update existing app
+              updatedData[existingAppIndex] = {
+                ...updatedData[existingAppIndex],
+                time: app.time, // Replace with the most accurate data
+                lastUsed: app.lastUsed,
+                category: app.category,
+                color: app.color
+              };
+            } else {
+              // Add new app
+              updatedData.push(app);
+            }
+          });
+          
+          // Update localStorage with the new data
+          localStorage.setItem('appUsageData', JSON.stringify(updatedData));
+          
+          // Force re-fetch data from context
+          const total = getTotalScreenTime();
+          console.log('Total screen time:', total);
+          setTotalScreenTime(total);
+          
+          // Calculate percentage of limit
+          const percent = (total / screenTimeLimit) * 100;
+          setPercentOfLimit(Math.min(percent, 100));
+          
+          console.log('App usage data updated successfully with real-time data');
+        } else {
+          console.log('No app usage data found for the last hour');
+          
+          // Force re-fetch data from context
+          const total = getTotalScreenTime();
+          console.log('Total screen time:', total);
+          setTotalScreenTime(total);
+          
+          // Calculate percentage of limit
+          const percent = (total / screenTimeLimit) * 100;
+          setPercentOfLimit(Math.min(percent, 100));
+        }
       } else {
         console.log('No permission to access usage data, using cached data');
         
