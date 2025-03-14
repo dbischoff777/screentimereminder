@@ -42,6 +42,8 @@ interface ScreenTimeContextType {
   getLastHourUsage: () => Promise<TrackerAppUsage[]>;
   // Test data function
   addTestAppUsage: () => void;
+  // New function
+  updateAppUsageData: () => Promise<boolean>;
 }
 
 const ScreenTimeContext = createContext<ScreenTimeContextType | undefined>(undefined);
@@ -583,6 +585,67 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     }
   };
 
+  // Update app usage data with fresh data from the system
+  const updateAppUsageData = async (): Promise<boolean> => {
+    try {
+      console.log('ScreenTimeContext: Updating app usage data with fresh data from system');
+      
+      // Get the latest data from the system
+      const appUsageTracker = AppUsageTrackerService.getInstance();
+      const hasPermission = await appUsageTracker.hasUsagePermission();
+      
+      if (!hasPermission) {
+        console.log('No permission to access usage data, cannot update');
+        return false;
+      }
+      
+      // Get data for today
+      const now = Date.now();
+      const startOfDay = new Date().setHours(0, 0, 0, 0);
+      const latestData = await appUsageTracker.getAppUsageData(startOfDay, now);
+      
+      if (!latestData || latestData.length === 0) {
+        console.log('No app usage data found for today');
+        return false;
+      }
+      
+      console.log(`Received ${latestData.length} app usage records from system`);
+      
+      // Update the app usage data state
+      const updatedData = [...appUsageData];
+      
+      latestData.forEach(app => {
+        const existingAppIndex = updatedData.findIndex(a => a.name === app.name);
+        
+        if (existingAppIndex >= 0) {
+          // Update existing app
+          updatedData[existingAppIndex] = {
+            ...updatedData[existingAppIndex],
+            time: app.time, // Replace with the most accurate data
+            lastUsed: app.lastUsed,
+            category: app.category,
+            color: app.color
+          };
+        } else {
+          // Add new app
+          updatedData.push(app);
+        }
+      });
+      
+      // Update state with the new data
+      setAppUsageData(updatedData);
+      
+      // Update localStorage
+      localStorage.setItem('appUsageData', JSON.stringify(updatedData));
+      
+      console.log('App usage data updated successfully with real-time data');
+      return true;
+    } catch (error) {
+      console.error('Error updating app usage data:', error);
+      return false;
+    }
+  };
+
   // Add test app usage data for debugging
   const addTestAppUsage = () => {
     console.log('Adding test app usage data');
@@ -659,7 +722,8 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
         resetDailyUsage,
         getAppUsageData,
         getLastHourUsage,
-        addTestAppUsage
+        addTestAppUsage,
+        updateAppUsageData
       }}
     >
       {children}

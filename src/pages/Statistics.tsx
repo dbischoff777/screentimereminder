@@ -6,13 +6,19 @@ import { useLocation } from 'react-router-dom';
 import { FiCheckCircle, FiRefreshCw } from 'react-icons/fi';
 
 const Statistics = () => {
-  const { appUsageData, getTotalScreenTime, screenTimeLimit, getLastHourUsage } = useScreenTime();
+  const { 
+    appUsageData, 
+    getTotalScreenTime, 
+    screenTimeLimit, 
+    updateAppUsageData 
+  } = useScreenTime();
   const [totalScreenTime, setTotalScreenTime] = useState(0);
   const [percentOfLimit, setPercentOfLimit] = useState(0);
   const [showResetNotification, setShowResetNotification] = useState(false);
   const [isPulling, setIsPulling] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshSuccess, setRefreshSuccess] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const startY = useRef<number | null>(null);
   const location = useLocation();
@@ -48,6 +54,8 @@ const Statistics = () => {
     // Calculate percentage of limit
     const percent = (total / screenTimeLimit) * 100;
     setPercentOfLimit(Math.min(percent, 100)); // Cap at 100%
+    
+    console.log('Statistics: Updated UI with latest app usage data');
   }, [appUsageData, screenTimeLimit, getTotalScreenTime]);
 
   // Setup pull-to-refresh
@@ -106,80 +114,24 @@ const Statistics = () => {
     
     // Show loading state
     setIsRefreshing(true);
+    setRefreshSuccess(false);
     
     try {
-      // Get the AppUsageTracker service
-      const AppUsageTrackerService = (await import('../services/AppUsageTracker')).default;
-      const tracker = AppUsageTrackerService.getInstance();
+      // Use the context's updateAppUsageData function to get fresh data
+      const success = await updateAppUsageData();
       
-      // Check if we have permission to access usage data
-      const hasPermission = await tracker.hasUsagePermission();
-      console.log('Permission to access usage data:', hasPermission);
-      
-      if (hasPermission) {
-        // Fetch the latest app usage data from Android
-        console.log('Fetching latest app usage data from Android...');
+      if (success) {
+        console.log('Successfully updated app usage data');
+        setRefreshSuccess(true);
         
-        // Get last hour usage data directly from the native layer
-        const lastHourData = await getLastHourUsage();
-        console.log('Last hour usage data:', lastHourData);
-        
-        if (lastHourData && lastHourData.length > 0) {
-          // Update app usage data in context
-          // This will update the main UI as well
-          const updatedData = [...appUsageData];
-          
-          lastHourData.forEach(app => {
-            const existingAppIndex = updatedData.findIndex(a => a.name === app.name);
-            
-            if (existingAppIndex >= 0) {
-              // Update existing app
-              updatedData[existingAppIndex] = {
-                ...updatedData[existingAppIndex],
-                time: app.time, // Replace with the most accurate data
-                lastUsed: app.lastUsed,
-                category: app.category,
-                color: app.color
-              };
-            } else {
-              // Add new app
-              updatedData.push(app);
-            }
-          });
-          
-          // Update localStorage with the new data
-          localStorage.setItem('appUsageData', JSON.stringify(updatedData));
-          
-          // Force re-fetch data from context
-          const total = getTotalScreenTime();
-          console.log('Total screen time:', total);
-          setTotalScreenTime(total);
-          
-          // Calculate percentage of limit
-          const percent = (total / screenTimeLimit) * 100;
-          setPercentOfLimit(Math.min(percent, 100));
-          
-          console.log('App usage data updated successfully with real-time data');
-        } else {
-          console.log('No app usage data found for the last hour');
-          
-          // Force re-fetch data from context
-          const total = getTotalScreenTime();
-          console.log('Total screen time:', total);
-          setTotalScreenTime(total);
-          
-          // Calculate percentage of limit
-          const percent = (total / screenTimeLimit) * 100;
-          setPercentOfLimit(Math.min(percent, 100));
-        }
+        // Show success notification briefly
+        setTimeout(() => {
+          setRefreshSuccess(false);
+        }, 3000);
       } else {
-        console.log('No permission to access usage data, using cached data');
+        console.log('Failed to update app usage data');
         
-        // Force reload data from localStorage
-        const savedData = localStorage.getItem('appUsageData');
-        console.log('Data from localStorage:', savedData ? 'Found' : 'Not found');
-        
-        // Force re-fetch data from context
+        // Force re-fetch data from context anyway
         const total = getTotalScreenTime();
         console.log('Total screen time:', total);
         setTotalScreenTime(total);
@@ -192,7 +144,6 @@ const Statistics = () => {
       // Hide loading state after a short delay to show the refresh animation
       setTimeout(() => {
         setIsRefreshing(false);
-        console.log('Statistics data refreshed successfully');
       }, 500);
     } catch (error) {
       console.error('Error refreshing data:', error);
@@ -337,6 +288,23 @@ const Statistics = () => {
           }}
         >
           Your app usage data has been successfully reset.
+        </Notification>
+      )}
+      
+      {refreshSuccess && (
+        <Notification
+          icon={<FiRefreshCw size={20} />}
+          color="cyan"
+          title="Data Refreshed!"
+          onClose={() => setRefreshSuccess(false)}
+          style={{ 
+            marginBottom: '1rem',
+            backgroundColor: 'rgba(0, 255, 255, 0.2)',
+            borderColor: '#00FFFF',
+            color: '#00FFFF'
+          }}
+        >
+          Your app usage data has been updated with the latest information.
         </Notification>
       )}
       
