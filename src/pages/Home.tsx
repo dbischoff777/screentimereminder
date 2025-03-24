@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Container, Title, Text, Button, Box, Group, Divider } from '@mantine/core';
+import { Container, Title, Text, Button, Divider, Box } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import AppUsageTracker from '../services/AppUsageTracker';
@@ -17,7 +17,6 @@ const welcomeMessages = [
 const Home = () => {
   const navigate = useNavigate();
   const [welcomeMessage, setWelcomeMessage] = useState('');
-  const [hasUsagePermission, setHasUsagePermission] = useState<boolean | null>(null);
   const { usageAccessEnabled } = useScreenTime();
   
   // Get the tracker service instance
@@ -31,12 +30,9 @@ const Home = () => {
     // Check usage access permission status
     const checkUsagePermission = async () => {
       try {
-        const hasPermission = await trackerService.hasUsagePermission();
-        console.log('Home: Usage access permission status:', hasPermission);
-        setHasUsagePermission(hasPermission);
+        await trackerService.hasUsagePermission();
       } catch (error) {
         console.error('Home: Error checking usage access permission:', error);
-        setHasUsagePermission(false);
       }
     };
     
@@ -88,67 +84,39 @@ const Home = () => {
           {welcomeMessage}
         </Text>
 
-        <Group style={{ justifyContent: 'center', gap: '16px' }}>
-          <Button
-            size="lg"
-            onClick={() => navigate('/statistics')}
-            style={{
-              marginTop: '1rem',
-              background: 'linear-gradient(45deg, #FF00FF, #00FFFF)',
-            }}
-          >
-            View Your Stats
-          </Button>
+        {/* Usage Access Permission Section */}
+        <Box mt="xl" style={{ marginTop: '2rem' }}>
+          <Divider 
+            my="md" 
+            label={
+              <Text size="sm" style={{ color: '#FF00FF' }}>
+                <FiBarChart2 style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
+                Enable Usage Access
+              </Text>
+            } 
+            labelPosition="center"
+            style={{ borderColor: '#FF00FF' }}
+          />
+          
+          <Text size="sm" style={{ color: '#f0f0f0', marginBottom: '1rem' }}>
+            To track your screen time and provide accurate statistics, 
+            the app needs permission to access usage data.
+          </Text>
           
           <Button
             size="lg"
             onClick={() => navigate('/settings')}
-            variant="outline"
             style={{
-              marginTop: '1rem',
-              borderColor: '#00FFFF',
-              color: '#00FFFF',
+              background: 'linear-gradient(45deg, #00FFFF, #FF00FF)',
+              color: '#000',
+              fontWeight: 'bold',
             }}
+            fullWidth
           >
-            Settings
+            <FiSettings style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} />
+            Enable Usage Access in Settings
           </Button>
-        </Group>
-        
-        {/* Usage Access Permission Button */}
-        {hasUsagePermission === false && (
-          <Box mt="xl" style={{ marginTop: '2rem' }}>
-            <Divider 
-              my="md" 
-              label={
-                <Text size="sm" style={{ color: '#FF00FF' }}>
-                  <FiBarChart2 style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
-                  Enable Usage Access
-                </Text>
-              } 
-              labelPosition="center"
-              style={{ borderColor: '#FF00FF' }}
-            />
-            
-            <Text size="sm" style={{ color: '#f0f0f0', marginBottom: '1rem' }}>
-              To track your screen time and provide accurate statistics, 
-              the app needs permission to access usage data.
-            </Text>
-            
-            <Button
-              size="lg"
-              onClick={() => navigate('/settings')}
-              style={{
-                background: 'linear-gradient(45deg, #00FFFF, #FF00FF)',
-                color: '#000',
-                fontWeight: 'bold',
-              }}
-              fullWidth
-            >
-              <FiSettings style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} />
-              Enable Usage Access in Settings
-            </Button>
-          </Box>
-        )}
+        </Box>
       </Box>
     </Container>
   );

@@ -599,7 +599,7 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
         return false;
       }
       
-      // Get data for today
+      // Get data for today only
       const now = Date.now();
       const startOfDay = new Date().setHours(0, 0, 0, 0);
       const latestData = await appUsageTracker.getAppUsageData(startOfDay, now);
@@ -609,28 +609,17 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
         return false;
       }
       
-      console.log(`Received ${latestData.length} app usage records from system`);
+      console.log(`Received ${latestData.length} app usage records from system for today`);
       
-      // Update the app usage data state
-      const updatedData = [...appUsageData];
-      
-      latestData.forEach(app => {
-        const existingAppIndex = updatedData.findIndex(a => a.name === app.name);
-        
-        if (existingAppIndex >= 0) {
-          // Update existing app
-          updatedData[existingAppIndex] = {
-            ...updatedData[existingAppIndex],
-            time: app.time, // Replace with the most accurate data
-            lastUsed: app.lastUsed,
-            category: app.category,
-            color: app.color
-          };
-        } else {
-          // Add new app
-          updatedData.push(app);
-        }
-      });
+      // Update the app usage data state with only today's data
+      const updatedData = latestData.map(app => ({
+        name: app.name,
+        time: app.time,
+        lastUsed: app.lastUsed,
+        category: app.category,
+        color: getCategoryColor(app.category),
+        isActive: false
+      }));
       
       // Update state with the new data
       setAppUsageData(updatedData);
@@ -638,7 +627,7 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
       // Update localStorage
       localStorage.setItem('appUsageData', JSON.stringify(updatedData));
       
-      console.log('App usage data updated successfully with real-time data');
+      console.log('App usage data updated successfully with today\'s data');
       return true;
     } catch (error) {
       console.error('Error updating app usage data:', error);

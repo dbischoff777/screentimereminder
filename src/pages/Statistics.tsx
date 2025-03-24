@@ -151,8 +151,13 @@ const Statistics = () => {
     }
   };
 
-  // Sort apps by usage time (descending)
-  const sortedApps = [...appUsageData].sort((a, b) => b.time - a.time);
+  // Sort apps by usage time (descending) and filter out apps with less than 5% usage
+  const sortedApps = [...appUsageData]
+    .filter(app => {
+      const percentage = (app.time / getTotalScreenTime()) * 100;
+      return percentage >= 5; // Only show apps with 5% or more usage
+    })
+    .sort((a, b) => b.time - a.time);
   
   // Format time (minutes) to hours and minutes
   const formatTime = (minutes: number) => {
@@ -418,7 +423,7 @@ const Statistics = () => {
           <div style={{ height: 300 }}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
-                data={appUsageData}
+                data={sortedApps}
                 margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" />
@@ -470,7 +475,7 @@ const Statistics = () => {
               </Text>
             ) : (
               <div style={{ marginTop: '1rem' }}>
-                {appUsageData.map((app, index) => (
+                {sortedApps.map((app, index) => (
                   <div key={index} style={{ display: 'flex', alignItems: 'center', marginBottom: '0.75rem' }}>
                     <div
                       style={{
@@ -502,7 +507,7 @@ const Statistics = () => {
                 size={150}
                 thickness={12}
                 roundCaps
-                sections={appUsageData.map(app => ({
+                sections={sortedApps.map(app => ({
                   value: (app.time / totalScreenTime) * 100,
                   color: app.color,
                 }))}
