@@ -21,7 +21,9 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
+import androidx.work.Constraints;
 import androidx.work.ExistingPeriodicWorkPolicy;
+import androidx.work.NetworkType;
 import androidx.work.PeriodicWorkRequest;
 import androidx.work.WorkManager;
 import androidx.work.Worker;
@@ -42,21 +44,17 @@ public class BackgroundService extends Service {
     private static final int NOTIFICATION_ID = 1000;
     private static final String CHANNEL_ID = "screen_time_reminder_channel";
     private static final String WORK_NAME = "app_usage_tracking";
-    private static final long CHECK_INTERVAL = 60000; // Check every minute
     private static final String PREFS_NAME = "ScreenTimePrefs";
     private static final String KEY_SCREEN_TIME_LIMIT = "screen_time_limit";
     private static final String KEY_NOTIFICATION_FREQUENCY = "notification_frequency";
     private static final String KEY_NOTIFICATIONS_ENABLED = "notifications_enabled";
     
     private final IBinder binder = new LocalBinder();
-    private PowerManager.WakeLock wakeLock;
-    private boolean isRunning = false;
-    private Handler handler;
-    private Runnable usageCheckRunnable;
-    private Map<String, Long> appUsageTimes = new ConcurrentHashMap<>();
-    private long lastCheckTime = 0;
     private NotificationHelper notificationHelper;
     private SharedPreferences prefs;
+    private WorkManager workManager;
+    
+    private boolean isRunning = false;
     
     /**
      * Class for clients to access the service
@@ -72,9 +70,9 @@ public class BackgroundService extends Service {
         try {
             super.onCreate();
             Log.d(TAG, "Background service created");
-            handler = new Handler(Looper.getMainLooper());
             notificationHelper = new NotificationHelper(this);
             prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            workManager = WorkManager.getInstance(this);
             setupBackgroundWork();
         } catch (Exception e) {
             Log.e(TAG, "Error in onCreate", e);
@@ -82,33 +80,40 @@ public class BackgroundService extends Service {
     }
     
     private void setupBackgroundWork() {
-        // Create a periodic work request that runs every 15 minutes
-        PeriodicWorkRequest usageTrackingWork = new PeriodicWorkRequest.Builder(
-            AppUsageTrackingWorker.class,
-            15, // Repeat interval
-            TimeUnit.MINUTES
-        ).build();
-        
-        // Enqueue the work with a unique name
-        WorkManager.getInstance(this)
-            .enqueueUniquePeriodicWork(
+        try {
+            // Create a periodic work request that runs every 5 minutes
+            PeriodicWorkRequest usageTrackingWork = new PeriodicWorkRequest.Builder(
+                AppUsageTrackingWorker.class,
+                5, // Repeat interval
+                TimeUnit.MINUTES
+            )
+            .setConstraints(
+                new Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.NOT_REQUIRED)
+                    .setRequiresBatteryNotLow(true)
+                    .build()
+            )
+            .build();
+            
+            // Enqueue the work with a unique name
+            workManager.enqueueUniquePeriodicWork(
                 WORK_NAME,
                 ExistingPeriodicWorkPolicy.REPLACE,
                 usageTrackingWork
             );
+            
+            Log.d(TAG, "Background work scheduled successfully");
+        } catch (Exception e) {
+            Log.e(TAG, "Error scheduling background work", e);
+        }
     }
     
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         try {
             Log.d(TAG, "Background service started");
-            
-            if (!isRunning) {
-                isRunning = true;
-                startForeground();
-                acquireWakeLock();
-            }
-            
+            isRunning = true;
+            startForeground();
             return START_STICKY;
         } catch (Exception e) {
             Log.e(TAG, "Error in onStartCommand", e);
@@ -126,21 +131,19 @@ public class BackgroundService extends Service {
     public void onDestroy() {
         try {
             Log.d(TAG, "Background service destroyed");
-            
-            if (handler != null && usageCheckRunnable != null) {
-                handler.removeCallbacks(usageCheckRunnable);
-            }
-            
-            if (wakeLock != null && wakeLock.isHeld()) {
-                wakeLock.release();
-                wakeLock = null;
-            }
-            
             isRunning = false;
+            // Cancel the background work when the service is destroyed
+            if (workManager != null) {
+                workManager.cancelUniqueWork(WORK_NAME);
+            }
             super.onDestroy();
         } catch (Exception e) {
             Log.e(TAG, "Error in onDestroy", e);
         }
+    }
+    
+    public boolean isRunning() {
+        return isRunning;
     }
     
     /**
@@ -192,74 +195,45 @@ public class BackgroundService extends Service {
             Log.e(TAG, "Error starting foreground service", e);
         }
     }
-    
-    /**
-     * Acquire a wake lock to keep the CPU running while the service is active
-     */
-    private void acquireWakeLock() {
-        try {
-            if (wakeLock == null) {
-                PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
-                if (powerManager != null) {
-                    wakeLock = powerManager.newWakeLock(
-                        PowerManager.PARTIAL_WAKE_LOCK,
-                        "ScreenTimeReminder:BackgroundServiceWakeLock"
-                    );
-                    wakeLock.acquire();
-                    Log.d(TAG, "Wake lock acquired");
-                }
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error acquiring wake lock", e);
-        }
-    }
-    
-    /**
-     * Check if the service is currently running
-     */
-    public boolean isRunning() {
-        return isRunning;
-    }
-    
-    public Map<String, Long> getAppUsageTimes() {
-        return appUsageTimes;
-    }
-    
-    public void resetUsageTimes() {
-        appUsageTimes.clear();
-        lastCheckTime = System.currentTimeMillis();
-    }
 }
 
 // Worker class for background app usage tracking
 class AppUsageTrackingWorker extends Worker {
     private static final String TAG = "AppUsageTrackingWorker";
+    private static final String PREFS_NAME = "ScreenTimePrefs";
+    private static final String KEY_SCREEN_TIME_LIMIT = "screen_time_limit";
+    private static final String KEY_NOTIFICATION_FREQUENCY = "notification_frequency";
+    private static final String KEY_NOTIFICATIONS_ENABLED = "notifications_enabled";
+    
     private final UsageStatsManager usageStatsManager;
     private final AppUsageDataStore dataStore;
     private final NotificationHelper notificationHelper;
+    private final SharedPreferences prefs;
     
     public AppUsageTrackingWorker(@NonNull Context context, @NonNull WorkerParameters params) {
         super(context, params);
         this.usageStatsManager = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
         this.dataStore = new AppUsageDataStore(context);
         this.notificationHelper = new NotificationHelper(context);
+        this.prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
     
     @NonNull
     @Override
     public Result doWork() {
         try {
-            // Get today's start time
+            Log.d(TAG, "Starting background work");
+            
+            // Get the current time and calculate the start time (beginning of day)
+            long endTime = System.currentTimeMillis();
             Calendar calendar = Calendar.getInstance();
             calendar.set(Calendar.HOUR_OF_DAY, 0);
             calendar.set(Calendar.MINUTE, 0);
             calendar.set(Calendar.SECOND, 0);
             calendar.set(Calendar.MILLISECOND, 0);
-            
             long startTime = calendar.getTimeInMillis();
-            long endTime = System.currentTimeMillis();
             
-            // Get usage stats for today
+            // Get usage stats for the day
             List<UsageStats> usageStats = usageStatsManager.queryUsageStats(
                 UsageStatsManager.INTERVAL_DAILY,
                 startTime,
@@ -267,45 +241,56 @@ class AppUsageTrackingWorker extends Worker {
             );
             
             if (usageStats != null) {
-                // Process usage stats and update the app's data
+                // Process and store the usage data
                 for (UsageStats stats : usageStats) {
-                    if (stats.getTotalTimeInForeground() > 0) {
-                        dataStore.updateAppUsage(stats.getPackageName(), stats.getTotalTimeInForeground());
+                    if (stats.getTotalTimeVisible() > 0) {
+                        dataStore.updateAppUsage(
+                            stats.getPackageName(),
+                            stats.getTotalTimeVisible() / 60000 // Convert to minutes
+                        );
                     }
                 }
                 
                 // Check if we need to send notifications
                 checkAndSendNotifications();
+                
+                Log.d(TAG, "Background work completed successfully");
+                return Result.success();
+            } else {
+                Log.w(TAG, "No usage stats available");
+                return Result.retry();
             }
-            
-            return Result.success();
         } catch (Exception e) {
             Log.e(TAG, "Error in background work", e);
-            return Result.retry();
+            return Result.failure();
         }
     }
     
     private void checkAndSendNotifications() {
-        // Get the current screen time limit and notification settings from SharedPreferences
-        SharedPreferences prefs = getApplicationContext().getSharedPreferences("ScreenTimePrefs", Context.MODE_PRIVATE);
-        boolean notificationsEnabled = prefs.getBoolean("notificationsEnabled", false);
-        long screenTimeLimit = prefs.getLong("screenTimeLimit", 0) * 60 * 1000; // Convert minutes to milliseconds
-        long notificationFrequency = prefs.getLong("notificationFrequency", 15) * 60 * 1000; // Convert minutes to milliseconds
-        
-        if (!notificationsEnabled || screenTimeLimit == 0) {
-            return;
-        }
-        
-        long totalScreenTime = dataStore.getTotalScreenTime();
-        
-        // Check if we're approaching the limit
-        if (totalScreenTime >= (screenTimeLimit - notificationFrequency) && totalScreenTime < screenTimeLimit) {
-            notificationHelper.showApproachingLimitNotification(totalScreenTime, screenTimeLimit);
-        }
-        
-        // Check if we've reached the limit
-        if (totalScreenTime >= screenTimeLimit) {
-            notificationHelper.showLimitReachedNotification();
+        try {
+            boolean notificationsEnabled = prefs.getBoolean(KEY_NOTIFICATIONS_ENABLED, false);
+            if (!notificationsEnabled) {
+                return;
+            }
+            
+            int screenTimeLimit = prefs.getInt(KEY_SCREEN_TIME_LIMIT, 120); // Default 2 hours
+            int notificationFrequency = prefs.getInt(KEY_NOTIFICATION_FREQUENCY, 15); // Default 15 minutes
+            
+            // Get total screen time for today
+            long totalScreenTime = dataStore.getTotalScreenTime();
+            
+            // Check if we're approaching the limit
+            if (totalScreenTime >= (screenTimeLimit - notificationFrequency) * 60000 && 
+                totalScreenTime < screenTimeLimit * 60000) {
+                long minutesRemaining = (screenTimeLimit * 60000 - totalScreenTime) / 60000;
+                notificationHelper.showApproachingLimitNotification(minutesRemaining, totalScreenTime);
+            }
+            // Check if we've reached the limit
+            else if (totalScreenTime >= screenTimeLimit * 60000) {
+                notificationHelper.showLimitReachedNotification();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking notifications", e);
         }
     }
 } 
