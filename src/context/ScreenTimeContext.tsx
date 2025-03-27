@@ -340,14 +340,19 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
         backgroundService.initialize();
       } catch (initError) {
         console.error('Failed to initialize background service:', initError);
-        // Continue execution even if initialization fails
       }
       
       // Set up tracking callback with error handling
       try {
-        backgroundService.setTrackingCallback(() => {
+        backgroundService.setTrackingCallback(async () => {
           try {
-            // Update active app usage
+            // Update app usage data from system
+            await updateAppUsageData();
+            
+            // Check screen time limit after updating data
+            await checkScreenTimeLimit();
+            
+            // Update active app usage if needed
             if (activeApp && trackingStartTime) {
               const currentTime = Date.now();
               const elapsedMinutes = (currentTime - trackingStartTime) / 60000;
@@ -362,13 +367,6 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
               
               // Reset tracking start time to now for next interval
               setTrackingStartTime(currentTime);
-            }
-            
-            // Also run the simulation in background with error handling
-            try {
-              simulateAppUsage();
-            } catch (simError) {
-              console.error('Error in app usage simulation:', simError);
             }
           } catch (callbackError) {
             console.error('Error in background tracking callback:', callbackError);
@@ -388,179 +386,201 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
           backgroundService.disableBackgroundMode();
         } catch (error) {
           console.error('Error disabling background service:', error);
-          // Continue cleanup even if this fails
         }
       }
     };
-  }, []);
-
-  // Extract simulateAppUsage function to be used in background service
-  const simulateAppUsage = () => {
-    // Disabled - we're now tracking actual app usage instead of simulating it
-    console.log('App usage simulation is disabled - tracking real usage only');
-    return;
-    
-    /* Original simulation code removed
-    try {
-      // Simulate more realistic usage patterns
-      setAppUsageData(prevData => {
-        try {
-          // Create a copy of the data
-          const updatedData = [...prevData];
-          
-          // Determine which apps to update based on time of day
-          const hour = new Date().getHours();
-          let categoriesToUpdate: string[] = [];
-          
-          // Morning (6-12): Productivity, Social Media
-          if (hour >= 6 && hour < 12) {
-            categoriesToUpdate = ['Productivity', 'Social Media'];
-          }
-          // Afternoon (12-18): Entertainment, Social Media, Games
-          else if (hour >= 12 && hour < 18) {
-            categoriesToUpdate = ['Entertainment', 'Social Media', 'Games'];
-          }
-          // Evening (18-23): Entertainment, Games, Social Media
-          else if (hour >= 18 && hour < 23) {
-            categoriesToUpdate = ['Entertainment', 'Games', 'Social Media'];
-          }
-          // Night (23-6): Entertainment, Social Media
-          else {
-            categoriesToUpdate = ['Entertainment', 'Social Media'];
-          }
-          
-          // Update apps in the selected categories
-          categoriesToUpdate.forEach(category => {
-            try {
-              const appsInCategory = updatedData.filter(app => app.category === category);
-              if (appsInCategory.length > 0) {
-                // Randomly select an app from this category
-                const randomApp = appsInCategory[Math.floor(Math.random() * appsInCategory.length)];
-                const appIndex = updatedData.findIndex(app => app.name === randomApp.name);
-                
-                if (appIndex !== -1) {
-                  // Add 1-3 minutes of usage
-                  const additionalTime = (Math.random() * 2 + 1) / 6; // 1-3 minutes divided by 6 (10-second intervals)
-                  
-                  updatedData[appIndex] = {
-                    ...updatedData[appIndex],
-                    time: updatedData[appIndex].time + additionalTime,
-                    lastUsed: new Date()
-                  };
-                }
-              }
-            } catch (categoryError) {
-              console.error(`Error updating category ${category}:`, categoryError);
-              // Continue with other categories even if one fails
-            }
-          });
-          
-          return updatedData;
-        } catch (dataError) {
-          console.error('Error updating app usage data:', dataError);
-          // Return original data if update fails
-          return prevData;
-        }
-      });
-    } catch (error) {
-      console.error('Critical error in simulateAppUsage:', error);
-    }
-    */
-  };
+  }, [activeApp, trackingStartTime]);
 
   // Calculate total screen time across all apps
   const getTotalScreenTime = (): number => {
     return appUsageData.reduce((total, app) => total + app.time, 0);
   };
 
-  // Check if screen time limit is reached and show notification
+  // Initialize notifications
   useEffect(() => {
-    const checkScreenTimeLimit = async () => {
-      const totalTime = getTotalScreenTime();
-      
-      if (notificationsEnabled) {
-        // Check if we're on a mobile device with Capacitor
+    const initializeNotifications = async () => {
+      try {
+        // Check if we're on a native platform
         const isCapacitorNative = typeof window !== 'undefined' && 
                                  window.Capacitor && 
                                  window.Capacitor.isNativePlatform();
         
+        if (isCapacitorNative) {
+          const { LocalNotifications } = await import('@capacitor/local-notifications');
+          
+          // Request permission
+          const { display } = await LocalNotifications.requestPermissions();
+          console.log('Notification permission status:', display);
+          
+          if (display === 'granted') {
+            // Register notification channels for Android
+            try {
+              // Create a high-priority channel for screen time alerts
+              await LocalNotifications.createChannel({
+                id: 'screen-time-alerts',
+                name: 'Screen Time Alerts',
+                description: 'Notifications for screen time limits and updates',
+                importance: 4, // High importance
+                visibility: 1,
+                sound: 'beep.wav',
+                vibration: true,
+                lights: true,
+                lightColor: '#FF00FF'
+              });
+
+              // Create a default channel for other notifications
+              await LocalNotifications.createChannel({
+                id: 'default',
+                name: 'Default',
+                description: 'Default notification channel',
+                importance: 3,
+                visibility: 1,
+                sound: 'beep.wav',
+                vibration: true,
+                lights: true,
+                lightColor: '#00FFFF'
+              });
+              
+              console.log('Notification channels created successfully');
+              
+              // Test notification to verify channel
+              await LocalNotifications.schedule({
+                notifications: [{
+                  title: 'Screen Time Reminder',
+                  body: 'Notification system initialized successfully',
+                  id: 999,
+                  channelId: 'screen-time-alerts',
+                  schedule: { at: new Date(Date.now() + 1000) },
+                  sound: 'beep.wav',
+                  smallIcon: 'ic_stat_screen_time',
+                  largeIcon: 'ic_launcher',
+                  autoCancel: true,
+                  attachments: undefined,
+                  actionTypeId: '',
+                  extra: null
+                }]
+              });
+            } catch (channelError) {
+              console.error('Error creating notification channel:', channelError);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error initializing notifications:', error);
+      }
+    };
+    
+    if (notificationsEnabled) {
+      initializeNotifications();
+    }
+  }, [notificationsEnabled]);
+
+  // Check if screen time limit is reached and show notification
+  const checkScreenTimeLimit = async () => {
+    const totalTime = getTotalScreenTime();
+    
+    if (notificationsEnabled) {
+      console.log('Checking screen time limit:', {
+        totalTime,
+        screenTimeLimit,
+        notificationFrequency,
+        shouldNotifyApproaching: totalTime >= (screenTimeLimit - notificationFrequency) && totalTime < screenTimeLimit,
+        shouldNotifyReached: totalTime >= screenTimeLimit
+      });
+      
+      // Check if we're on a mobile device with Capacitor
+      const isCapacitorNative = typeof window !== 'undefined' && 
+                               window.Capacitor && 
+                               window.Capacitor.isNativePlatform();
+      
+      if (!isCapacitorNative) {
+        console.log('Not on a native platform, skipping notifications');
+        return;
+      }
+      
+      try {
+        const { LocalNotifications } = await import('@capacitor/local-notifications');
+        
+        // Check if notifications are actually permitted
+        const { display } = await LocalNotifications.checkPermissions();
+        if (display !== 'granted') {
+          console.log('Notifications permission not granted, skipping notifications');
+          return;
+        }
+        
         // Approaching limit notification
         if (totalTime >= (screenTimeLimit - notificationFrequency) && totalTime < screenTimeLimit) {
-          if (isCapacitorNative) {
-            try {
-              // Use Capacitor LocalNotifications for mobile
-              const { LocalNotifications } = await import('@capacitor/local-notifications');
-              await LocalNotifications.schedule({
-                notifications: [
-                  {
-                    title: 'Screen Time Limit Approaching',
-                    body: `You're ${Math.round(screenTimeLimit - totalTime)} minutes away from your daily limit.`,
-                    id: 1,
-                    schedule: { at: new Date(Date.now()) }
-                  }
-                ]
-              });
-              console.log('Capacitor notification sent: approaching limit');
-            } catch (error) {
-              console.error('Error showing Capacitor notification:', error);
-            }
-          } else if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-            // Fallback to web Notification API
-            try {
-              new Notification('Screen Time Limit Approaching', {
-                body: `You're ${Math.round(screenTimeLimit - totalTime)} minutes away from your daily limit.`,
-                icon: '/notification-icon.png'
-              });
-              console.log('Web notification sent: approaching limit');
-            } catch (error) {
-              console.error('Error showing web notification:', error);
-            }
-          } else {
-            console.log('Notification would be shown: approaching limit');
+          try {
+            const minutesRemaining = Math.round(screenTimeLimit - totalTime);
+            console.log('Scheduling approaching limit notification, minutes remaining:', minutesRemaining);
+            
+            await LocalNotifications.schedule({
+              notifications: [{
+                title: 'Screen Time Limit Approaching',
+                body: `You're ${minutesRemaining} minutes away from your daily limit.`,
+                id: 1,
+                channelId: 'screen-time-alerts',
+                schedule: { at: new Date() },
+                sound: 'beep.wav',
+                smallIcon: 'ic_stat_screen_time',
+                largeIcon: 'ic_launcher',
+                autoCancel: true,
+                attachments: undefined,
+                actionTypeId: '',
+                extra: null
+              }]
+            });
+            console.log('Approaching limit notification scheduled successfully');
+          } catch (error) {
+            console.error('Error scheduling approaching limit notification:', error);
           }
         }
         // Limit reached notification
         else if (totalTime >= screenTimeLimit) {
-          if (isCapacitorNative) {
-            try {
-              // Use Capacitor LocalNotifications for mobile
-              const { LocalNotifications } = await import('@capacitor/local-notifications');
-              await LocalNotifications.schedule({
-                notifications: [
-                  {
-                    title: 'Screen Time Limit Reached',
-                    body: `You've reached your daily screen time limit of ${screenTimeLimit} minutes.`,
-                    id: 2,
-                    schedule: { at: new Date(Date.now()) }
-                  }
-                ]
-              });
-              console.log('Capacitor notification sent: limit reached');
-            } catch (error) {
-              console.error('Error showing Capacitor notification:', error);
-            }
-          } else if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-            // Fallback to web Notification API
-            try {
-              new Notification('Screen Time Limit Reached', {
+          try {
+            console.log('Scheduling limit reached notification');
+            
+            await LocalNotifications.schedule({
+              notifications: [{
+                title: 'Screen Time Limit Reached',
                 body: `You've reached your daily screen time limit of ${screenTimeLimit} minutes.`,
-                icon: '/notification-icon.png'
-              });
-              console.log('Web notification sent: limit reached');
-            } catch (error) {
-              console.error('Error showing web notification:', error);
-            }
-          } else {
-            console.log('Notification would be shown: limit reached');
+                id: 2,
+                channelId: 'screen-time-alerts',
+                schedule: { at: new Date() },
+                sound: 'beep.wav',
+                smallIcon: 'ic_stat_screen_time',
+                largeIcon: 'ic_launcher',
+                autoCancel: true,
+                attachments: undefined,
+                actionTypeId: '',
+                extra: null
+              }]
+            });
+            console.log('Limit reached notification scheduled successfully');
+          } catch (error) {
+            console.error('Error scheduling limit reached notification:', error);
           }
         }
+      } catch (error) {
+        console.error('Error in checkScreenTimeLimit:', error);
       }
+    } else {
+      console.log('Notifications are disabled, skipping screen time check');
+    }
+  };
+
+  // Check more frequently (every minute)
+  useEffect(() => {
+    console.log('Setting up screen time limit check interval');
+    const limitCheckInterval = setInterval(checkScreenTimeLimit, 60000);
+    
+    // Initial check
+    checkScreenTimeLimit();
+    
+    return () => {
+      console.log('Clearing screen time limit check interval');
+      clearInterval(limitCheckInterval);
     };
-    
-    // Check more frequently
-    const limitCheckInterval = setInterval(checkScreenTimeLimit, 60000); // Check every minute
-    
-    return () => clearInterval(limitCheckInterval);
   }, [appUsageData, screenTimeLimit, notificationsEnabled, notificationFrequency]);
 
   // Get app usage data for a specific time range
@@ -601,8 +621,12 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
       
       // Get data for today only
       const now = Date.now();
-      const startOfDay = new Date().setHours(0, 0, 0, 0);
-      const latestData = await appUsageTracker.getAppUsageData(startOfDay, now);
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const startOfDayTimestamp = startOfDay.getTime();
+      
+      console.log('Fetching data from:', new Date(startOfDayTimestamp).toISOString(), 'to', new Date(now).toISOString());
+      const latestData = await appUsageTracker.getAppUsageData(startOfDayTimestamp, now);
       
       if (!latestData || latestData.length === 0) {
         console.log('No app usage data found for today');
