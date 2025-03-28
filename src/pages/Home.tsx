@@ -72,8 +72,6 @@ const Home = () => {
           textAlign: 'center',
           padding: '2rem',
           background: 'transparent',
-          borderTop: '1px solid #FF00FF',
-          borderBottom: '1px solid #FF00FF',
           flex: 1
         }}
       >
@@ -143,7 +141,6 @@ const Home = () => {
           textAlign: 'center',
           padding: '1rem',
           marginTop: '2rem',
-          borderTop: '1px solid #FF00FF',
         }}
       >
         <Text

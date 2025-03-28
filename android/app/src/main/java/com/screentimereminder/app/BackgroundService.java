@@ -16,6 +16,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -30,6 +31,7 @@ import androidx.work.Worker;
 import androidx.work.WorkerParameters;
 
 import java.util.Calendar;
+import java.util.Date;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -166,61 +168,181 @@ public class BackgroundService extends Service {
     }
     
     private void scheduleServiceRestart() {
-        // Schedule a restart every 30 minutes to ensure the service stays alive
-        Handler restartHandler = new Handler(Looper.getMainLooper());
-        restartHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                if (isRunning) {
-                    Intent restartIntent = new Intent(getApplicationContext(), BackgroundService.class);
-                    restartIntent.setAction("RESTART_SERVICE");
-                    startService(restartIntent);
-                    restartHandler.postDelayed(this, 30 * 60 * 1000); // 30 minutes
-                }
-            }
-        }, 30 * 60 * 1000); // 30 minutes
+        try {
+            // Create an alarm to restart the service every 30 minutes
+            AlarmManager alarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+            Intent restartIntent = new Intent(this, BackgroundService.class);
+            PendingIntent restartPendingIntent = PendingIntent.getService(
+                this,
+                0,
+                restartIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            );
+
+            // Set the alarm to trigger every 30 minutes
+            long triggerTime = System.currentTimeMillis() + (30 * 60 * 1000);
+            alarmManager.setExactAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                triggerTime,
+                restartPendingIntent
+            );
+
+            Log.d(TAG, "Service restart scheduled for " + new Date(triggerTime));
+        } catch (Exception e) {
+            Log.e(TAG, "Error scheduling service restart", e);
+        }
     }
     
     private void updateScreenTime() {
         try {
+            if (!isRunning) {
+                Log.w(TAG, "Service not running, skipping screen time update");
+                return;
+            }
+
             long currentTime = System.currentTimeMillis();
             long timeDiff = currentTime - lastUpdateTime;
             
-            // Get actual usage stats for the period
-            Calendar calendar = Calendar.getInstance();
-            calendar.add(Calendar.MINUTE, -1); // Last minute
-            long startTime = calendar.getTimeInMillis();
-            
+            // Get usage stats for the time period
             List<UsageStats> usageStats = usageStatsManager.queryUsageStats(
                 UsageStatsManager.INTERVAL_DAILY,
-                startTime,
+                lastUpdateTime,
                 currentTime
             );
             
             if (usageStats != null) {
-                long totalVisibleTime = 0;
+                // Calculate total screen time
+                long periodScreenTime = 0;
                 for (UsageStats stats : usageStats) {
                     if (stats.getTotalTimeVisible() > 0) {
-                        totalVisibleTime += stats.getTotalTimeVisible();
+                        periodScreenTime += stats.getTotalTimeVisible();
                     }
                 }
                 
-                // Update total screen time with actual usage
-                totalScreenTime += totalVisibleTime;
-            } else {
-                // Fallback to time difference if usage stats are not available
-                totalScreenTime += timeDiff;
+                // Update total screen time
+                totalScreenTime += periodScreenTime;
+                
+                // Save the updated values
+                SharedPreferences.Editor editor = prefs.edit();
+                editor.putLong(KEY_LAST_UPDATE_TIME, currentTime);
+                editor.putLong(KEY_TOTAL_SCREEN_TIME, totalScreenTime);
+                editor.apply();
+                
+                // Check if we need to send notifications
+                checkAndSendNotifications();
+                
+                Log.d(TAG, "Screen time updated: " + (totalScreenTime / 60000) + " minutes");
             }
-            
-            // Save current state
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.putLong(KEY_LAST_UPDATE_TIME, currentTime);
-            editor.putLong(KEY_TOTAL_SCREEN_TIME, totalScreenTime);
-            editor.apply();
-            
-            Log.d(TAG, "Screen time updated: " + (totalScreenTime / 60000) + " minutes");
         } catch (Exception e) {
             Log.e(TAG, "Error updating screen time", e);
+        }
+    }
+    
+    private void checkAndSendNotifications() {
+        try {
+            boolean notificationsEnabled = prefs.getBoolean(KEY_NOTIFICATIONS_ENABLED, false);
+            if (!notificationsEnabled) {
+                return;
+            }
+            
+            int screenTimeLimit = prefs.getInt(KEY_SCREEN_TIME_LIMIT, 120); // Default 2 hours
+            int notificationFrequency = prefs.getInt(KEY_NOTIFICATION_FREQUENCY, 15); // Default 15 minutes
+            
+            // Convert total screen time to minutes
+            long totalMinutes = totalScreenTime / 60000;
+            
+            // Check if we're approaching the limit
+            if (totalMinutes >= (screenTimeLimit - notificationFrequency) && 
+                totalMinutes < screenTimeLimit) {
+                long minutesRemaining = screenTimeLimit - totalMinutes;
+                showApproachingLimitNotification(minutesRemaining);
+            }
+            // Check if we've reached the limit
+            else if (totalMinutes >= screenTimeLimit) {
+                showLimitReachedNotification();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking notifications", e);
+        }
+    }
+    
+    private void showApproachingLimitNotification(long minutesRemaining) {
+        try {
+            NotificationManager notificationManager = 
+                (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            
+            // Create notification channel for Android 8.0+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID,
+                    "Screen Time Alerts",
+                    NotificationManager.IMPORTANCE_HIGH
+                );
+                channel.setDescription("Notifications for screen time limits");
+                channel.enableVibration(true);
+                channel.enableLights(true);
+                channel.setLightColor(Color.BLUE);
+                notificationManager.createNotificationChannel(channel);
+            }
+            
+            // Create notification
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_screen_time)
+                .setContentTitle("Screen Time Limit Approaching")
+                .setContentText("You have " + minutesRemaining + " minutes remaining")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setVibrate(new long[]{0, 500, 200, 500})
+                .setLights(Color.BLUE, 3000, 3000);
+            
+            // Create intent to open app
+            Intent intent = new Intent(this, MainActivity.class);
+            PendingIntent pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            );
+            builder.setContentIntent(pendingIntent);
+            
+            // Show notification
+            notificationManager.notify(1, builder.build());
+            Log.d(TAG, "Approaching limit notification sent");
+        } catch (Exception e) {
+            Log.e(TAG, "Error showing approaching limit notification", e);
+        }
+    }
+    
+    private void showLimitReachedNotification() {
+        try {
+            NotificationManager notificationManager = 
+                (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            
+            // Create notification
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_screen_time)
+                .setContentTitle("Screen Time Limit Reached")
+                .setContentText("You've reached your daily screen time limit")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setVibrate(new long[]{0, 1000, 500, 1000})
+                .setLights(Color.RED, 3000, 3000);
+            
+            // Create intent to open app
+            Intent intent = new Intent(this, MainActivity.class);
+            PendingIntent pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            );
+            builder.setContentIntent(pendingIntent);
+            
+            // Show notification
+            notificationManager.notify(2, builder.build());
+            Log.d(TAG, "Limit reached notification sent");
+        } catch (Exception e) {
+            Log.e(TAG, "Error showing limit reached notification", e);
         }
     }
     
