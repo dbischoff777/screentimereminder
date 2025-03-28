@@ -16,6 +16,21 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    
+    sourceSets {
+        main {
+            java {
+                srcDirs = ['src/main/java']
+            }
+            res {
+                srcDirs = ['src/main/res']
+            }
+            manifest {
+                srcFile 'src/main/AndroidManifest.xml'
+            }
+        }
+    }
+    
     buildTypes {
         release {
             minifyEnabled false
