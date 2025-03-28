@@ -31,8 +31,6 @@ import androidx.work.WorkerParameters;
 
 import java.util.Calendar;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -48,13 +46,20 @@ public class BackgroundService extends Service {
     private static final String KEY_SCREEN_TIME_LIMIT = "screen_time_limit";
     private static final String KEY_NOTIFICATION_FREQUENCY = "notification_frequency";
     private static final String KEY_NOTIFICATIONS_ENABLED = "notifications_enabled";
+    private static final String KEY_LAST_UPDATE_TIME = "last_update_time";
+    private static final String KEY_TOTAL_SCREEN_TIME = "total_screen_time";
+    private static final String KEY_SERVICE_RUNNING = "service_running";
     
     private final IBinder binder = new LocalBinder();
-    private NotificationHelper notificationHelper;
     private SharedPreferences prefs;
     private WorkManager workManager;
-    
+    private Handler updateHandler;
+    private Runnable updateRunnable;
+    private PowerManager.WakeLock wakeLock;
     private boolean isRunning = false;
+    private long lastUpdateTime;
+    private long totalScreenTime;
+    private UsageStatsManager usageStatsManager;
     
     /**
      * Class for clients to access the service
@@ -70,9 +75,36 @@ public class BackgroundService extends Service {
         try {
             super.onCreate();
             Log.d(TAG, "Background service created");
-            notificationHelper = new NotificationHelper(this);
+            
+            // Initialize managers and preferences
             prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             workManager = WorkManager.getInstance(this);
+            usageStatsManager = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+            
+            // Initialize wake lock with a more specific tag
+            PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP,
+                "ScreenTimeReminder::BackgroundTracking"
+            );
+            
+            // Initialize handler for periodic updates
+            updateHandler = new Handler(Looper.getMainLooper());
+            updateRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    updateScreenTime();
+                    updateHandler.postDelayed(this, 60000); // Update every minute
+                }
+            };
+            
+            // Load saved state
+            lastUpdateTime = prefs.getLong(KEY_LAST_UPDATE_TIME, System.currentTimeMillis());
+            totalScreenTime = prefs.getLong(KEY_TOTAL_SCREEN_TIME, 0);
+            
+            // Mark service as running
+            prefs.edit().putBoolean(KEY_SERVICE_RUNNING, true).apply();
+            
             setupBackgroundWork();
         } catch (Exception e) {
             Log.e(TAG, "Error in onCreate", e);
@@ -81,10 +113,10 @@ public class BackgroundService extends Service {
     
     private void setupBackgroundWork() {
         try {
-            // Create a periodic work request that runs every 5 minutes
+            // Create a periodic work request that runs every 1 minute
             PeriodicWorkRequest usageTrackingWork = new PeriodicWorkRequest.Builder(
                 AppUsageTrackingWorker.class,
-                5, // Repeat interval
+                1, // Repeat interval
                 TimeUnit.MINUTES
             )
             .setConstraints(
@@ -114,10 +146,81 @@ public class BackgroundService extends Service {
             Log.d(TAG, "Background service started");
             isRunning = true;
             startForeground();
+            
+            // Acquire wake lock with timeout
+            if (!wakeLock.isHeld()) {
+                wakeLock.acquire(24 * 60 * 60 * 1000L); // 24 hours
+            }
+            
+            // Start periodic updates
+            updateHandler.post(updateRunnable);
+            
+            // Schedule a restart of the service to ensure it stays alive
+            scheduleServiceRestart();
+            
             return START_STICKY;
         } catch (Exception e) {
             Log.e(TAG, "Error in onStartCommand", e);
             return START_NOT_STICKY;
+        }
+    }
+    
+    private void scheduleServiceRestart() {
+        // Schedule a restart every 30 minutes to ensure the service stays alive
+        Handler restartHandler = new Handler(Looper.getMainLooper());
+        restartHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (isRunning) {
+                    Intent restartIntent = new Intent(getApplicationContext(), BackgroundService.class);
+                    restartIntent.setAction("RESTART_SERVICE");
+                    startService(restartIntent);
+                    restartHandler.postDelayed(this, 30 * 60 * 1000); // 30 minutes
+                }
+            }
+        }, 30 * 60 * 1000); // 30 minutes
+    }
+    
+    private void updateScreenTime() {
+        try {
+            long currentTime = System.currentTimeMillis();
+            long timeDiff = currentTime - lastUpdateTime;
+            
+            // Get actual usage stats for the period
+            Calendar calendar = Calendar.getInstance();
+            calendar.add(Calendar.MINUTE, -1); // Last minute
+            long startTime = calendar.getTimeInMillis();
+            
+            List<UsageStats> usageStats = usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY,
+                startTime,
+                currentTime
+            );
+            
+            if (usageStats != null) {
+                long totalVisibleTime = 0;
+                for (UsageStats stats : usageStats) {
+                    if (stats.getTotalTimeVisible() > 0) {
+                        totalVisibleTime += stats.getTotalTimeVisible();
+                    }
+                }
+                
+                // Update total screen time with actual usage
+                totalScreenTime += totalVisibleTime;
+            } else {
+                // Fallback to time difference if usage stats are not available
+                totalScreenTime += timeDiff;
+            }
+            
+            // Save current state
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putLong(KEY_LAST_UPDATE_TIME, currentTime);
+            editor.putLong(KEY_TOTAL_SCREEN_TIME, totalScreenTime);
+            editor.apply();
+            
+            Log.d(TAG, "Screen time updated: " + (totalScreenTime / 60000) + " minutes");
+        } catch (Exception e) {
+            Log.e(TAG, "Error updating screen time", e);
         }
     }
     
@@ -132,10 +235,25 @@ public class BackgroundService extends Service {
         try {
             Log.d(TAG, "Background service destroyed");
             isRunning = false;
-            // Cancel the background work when the service is destroyed
+            
+            // Release wake lock
+            if (wakeLock.isHeld()) {
+                wakeLock.release();
+            }
+            
+            // Stop periodic updates
+            if (updateHandler != null && updateRunnable != null) {
+                updateHandler.removeCallbacks(updateRunnable);
+            }
+            
+            // Cancel the background work
             if (workManager != null) {
                 workManager.cancelUniqueWork(WORK_NAME);
             }
+            
+            // Mark service as not running
+            prefs.edit().putBoolean(KEY_SERVICE_RUNNING, false).apply();
+            
             super.onDestroy();
         } catch (Exception e) {
             Log.e(TAG, "Error in onDestroy", e);
@@ -144,6 +262,10 @@ public class BackgroundService extends Service {
     
     public boolean isRunning() {
         return isRunning;
+    }
+    
+    public long getTotalScreenTime() {
+        return totalScreenTime;
     }
     
     /**
@@ -207,14 +329,12 @@ class AppUsageTrackingWorker extends Worker {
     
     private final UsageStatsManager usageStatsManager;
     private final AppUsageDataStore dataStore;
-    private final NotificationHelper notificationHelper;
     private final SharedPreferences prefs;
     
     public AppUsageTrackingWorker(@NonNull Context context, @NonNull WorkerParameters params) {
         super(context, params);
         this.usageStatsManager = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
         this.dataStore = new AppUsageDataStore(context);
-        this.notificationHelper = new NotificationHelper(context);
         this.prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
     
@@ -251,9 +371,6 @@ class AppUsageTrackingWorker extends Worker {
                     }
                 }
                 
-                // Check if we need to send notifications
-                checkAndSendNotifications();
-                
                 Log.d(TAG, "Background work completed successfully");
                 return Result.success();
             } else {
@@ -263,34 +380,6 @@ class AppUsageTrackingWorker extends Worker {
         } catch (Exception e) {
             Log.e(TAG, "Error in background work", e);
             return Result.failure();
-        }
-    }
-    
-    private void checkAndSendNotifications() {
-        try {
-            boolean notificationsEnabled = prefs.getBoolean(KEY_NOTIFICATIONS_ENABLED, false);
-            if (!notificationsEnabled) {
-                return;
-            }
-            
-            int screenTimeLimit = prefs.getInt(KEY_SCREEN_TIME_LIMIT, 120); // Default 2 hours
-            int notificationFrequency = prefs.getInt(KEY_NOTIFICATION_FREQUENCY, 15); // Default 15 minutes
-            
-            // Get total screen time for today
-            long totalScreenTime = dataStore.getTotalScreenTime();
-            
-            // Check if we're approaching the limit
-            if (totalScreenTime >= (screenTimeLimit - notificationFrequency) * 60000 && 
-                totalScreenTime < screenTimeLimit * 60000) {
-                long minutesRemaining = (screenTimeLimit * 60000 - totalScreenTime) / 60000;
-                notificationHelper.showApproachingLimitNotification(minutesRemaining, totalScreenTime);
-            }
-            // Check if we've reached the limit
-            else if (totalScreenTime >= screenTimeLimit * 60000) {
-                notificationHelper.showLimitReachedNotification();
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error checking notifications", e);
         }
     }
 } 

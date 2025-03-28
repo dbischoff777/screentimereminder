@@ -17,6 +17,7 @@ const welcomeMessages = [
 const Home = () => {
   const navigate = useNavigate();
   const [welcomeMessage, setWelcomeMessage] = useState('');
+  const [appVersion, setAppVersion] = useState('');
   const { usageAccessEnabled } = useScreenTime();
   
   // Get the tracker service instance
@@ -26,6 +27,20 @@ const Home = () => {
     // Select a random welcome message
     const randomIndex = Math.floor(Math.random() * welcomeMessages.length);
     setWelcomeMessage(welcomeMessages[randomIndex]);
+    
+    // Get app version from Capacitor
+    const getAppVersion = async () => {
+      try {
+        const { App } = await import('@capacitor/app');
+        const info = await App.getInfo();
+        setAppVersion(`v${info.version} (${info.build})`);
+      } catch (error) {
+        console.error('Error getting app version:', error);
+        setAppVersion('v1.0.0 (1)');
+      }
+    };
+    
+    getAppVersion();
     
     // Check usage access permission status
     const checkUsagePermission = async () => {
@@ -47,7 +62,9 @@ const Home = () => {
       style={{
         background: '#000020', // Dark blue-black background
         minHeight: '100vh',
-        padding: '1rem'
+        padding: '1rem',
+        display: 'flex',
+        flexDirection: 'column'
       }}
     >
       <Box 
@@ -57,6 +74,7 @@ const Home = () => {
           background: 'transparent',
           borderTop: '1px solid #FF00FF',
           borderBottom: '1px solid #FF00FF',
+          flex: 1
         }}
       >
         <Title
@@ -117,6 +135,26 @@ const Home = () => {
             Enable Usage Access in Settings
           </Button>
         </Box>
+      </Box>
+
+      {/* Version Display */}
+      <Box
+        style={{
+          textAlign: 'center',
+          padding: '1rem',
+          marginTop: '2rem',
+          borderTop: '1px solid #FF00FF',
+        }}
+      >
+        <Text
+          size="sm"
+          style={{
+            color: '#AAAAAA',
+            fontFamily: 'monospace',
+          }}
+        >
+          {appVersion}
+        </Text>
       </Box>
     </Container>
   );
