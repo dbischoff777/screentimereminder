@@ -40,8 +40,6 @@ interface ScreenTimeContextType {
   // App usage data retrieval
   getAppUsageData: (startTime?: number, endTime?: number) => Promise<TrackerAppUsage[]>;
   getLastHourUsage: () => Promise<TrackerAppUsage[]>;
-  // Test data function
-  addTestAppUsage: () => void;
   // New function
   updateAppUsageData: () => Promise<boolean>;
 }
@@ -346,27 +344,36 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
       try {
         backgroundService.setTrackingCallback(async () => {
           try {
+            console.log('Background tracking callback triggered:', new Date().toISOString());
+            
             // Update app usage data from system
-            await updateAppUsageData();
+            const success = await updateAppUsageData();
+            console.log('Background updateAppUsageData result:', success);
             
-            // Check screen time limit after updating data
-            await checkScreenTimeLimit();
-            
-            // Update active app usage if needed
-            if (activeApp && trackingStartTime) {
-              const currentTime = Date.now();
-              const elapsedMinutes = (currentTime - trackingStartTime) / 60000;
+            if (success) {
+              // Check screen time limit after updating data
+              await checkScreenTimeLimit();
               
-              setAppUsageData(prevData => 
-                prevData.map(app => 
-                  app.name === activeApp 
-                    ? { ...app, time: app.time + elapsedMinutes, lastUsed: new Date() }
-                    : app
-                )
-              );
-              
-              // Reset tracking start time to now for next interval
-              setTrackingStartTime(currentTime);
+              // Update active app usage if needed
+              if (activeApp && trackingStartTime) {
+                const currentTime = Date.now();
+                const elapsedMinutes = (currentTime - trackingStartTime) / 60000;
+                
+                setAppUsageData(prevData => {
+                  const updatedData = prevData.map(app => 
+                    app.name === activeApp 
+                      ? { ...app, time: app.time + elapsedMinutes, lastUsed: new Date() }
+                      : app
+                  );
+                  
+                  // Save to localStorage immediately
+                  localStorage.setItem('appUsageData', JSON.stringify(updatedData));
+                  return updatedData;
+                });
+                
+                // Reset tracking start time to now for next interval
+                setTrackingStartTime(currentTime);
+              }
             }
           } catch (callbackError) {
             console.error('Error in background tracking callback:', callbackError);
@@ -480,12 +487,19 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     const totalTime = getTotalScreenTime();
     
     if (notificationsEnabled) {
-      console.log('Checking screen time limit:', {
+      console.log('Screen time limit check details:', {
         totalTime,
         screenTimeLimit,
         notificationFrequency,
-        shouldNotifyApproaching: totalTime >= (screenTimeLimit - notificationFrequency) && totalTime < screenTimeLimit,
-        shouldNotifyReached: totalTime >= screenTimeLimit
+        approachingThreshold: screenTimeLimit - notificationFrequency,
+        isLimitReached: totalTime >= screenTimeLimit,
+        isApproaching: totalTime >= (screenTimeLimit - notificationFrequency),
+        timeUntilLimit: screenTimeLimit - totalTime,
+        timeUntilApproaching: (screenTimeLimit - notificationFrequency) - totalTime,
+        appUsageData: appUsageData.map(app => ({
+          name: app.name,
+          time: app.time
+        }))
       });
       
       // Check if we're on a mobile device with Capacitor
@@ -508,42 +522,19 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
           return;
         }
         
-        // Approaching limit notification
-        if (totalTime >= (screenTimeLimit - notificationFrequency) && totalTime < screenTimeLimit) {
+        // First check if limit is reached
+        if (totalTime >= screenTimeLimit) {
           try {
-            const minutesRemaining = Math.round(screenTimeLimit - totalTime);
-            console.log('Scheduling approaching limit notification, minutes remaining:', minutesRemaining);
-            
-            await LocalNotifications.schedule({
-              notifications: [{
-                title: 'Screen Time Limit Approaching',
-                body: `You're ${minutesRemaining} minutes away from your daily limit.`,
-                id: 1,
-                channelId: 'screen-time-alerts',
-                schedule: { at: new Date() },
-                sound: 'beep.wav',
-                smallIcon: 'ic_stat_screen_time',
-                largeIcon: 'ic_launcher',
-                autoCancel: true,
-                attachments: undefined,
-                actionTypeId: '',
-                extra: null
-              }]
+            console.log('Scheduling limit reached notification:', {
+              totalTime,
+              screenTimeLimit,
+              difference: totalTime - screenTimeLimit
             });
-            console.log('Approaching limit notification scheduled successfully');
-          } catch (error) {
-            console.error('Error scheduling approaching limit notification:', error);
-          }
-        }
-        // Limit reached notification
-        else if (totalTime >= screenTimeLimit) {
-          try {
-            console.log('Scheduling limit reached notification');
             
             await LocalNotifications.schedule({
               notifications: [{
                 title: 'Screen Time Limit Reached',
-                body: `You've reached your daily screen time limit of ${screenTimeLimit} minutes.`,
+                body: `Total Screen Time: ${Math.round(totalTime)} minutes\nDaily Limit: ${screenTimeLimit} minutes\nYou have reached your daily limit!`,
                 id: 2,
                 channelId: 'screen-time-alerts',
                 schedule: { at: new Date() },
@@ -560,6 +551,48 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
           } catch (error) {
             console.error('Error scheduling limit reached notification:', error);
           }
+        }
+        // Then check if we're approaching the limit
+        else if (totalTime >= (screenTimeLimit - notificationFrequency)) {
+          try {
+            const minutesRemaining = Math.round(screenTimeLimit - totalTime);
+            console.log('Scheduling approaching limit notification:', {
+              totalTime,
+              screenTimeLimit,
+              notificationFrequency,
+              approachingThreshold: screenTimeLimit - notificationFrequency,
+              minutesRemaining,
+              difference: totalTime - (screenTimeLimit - notificationFrequency)
+            });
+            
+            await LocalNotifications.schedule({
+              notifications: [{
+                title: 'Screen Time Limit Approaching',
+                body: `Total Screen Time: ${Math.round(totalTime)} minutes\nDaily Limit: ${screenTimeLimit} minutes\n${minutesRemaining} minutes remaining`,
+                id: 1,
+                channelId: 'screen-time-alerts',
+                schedule: { at: new Date() },
+                sound: 'beep.wav',
+                smallIcon: 'ic_stat_screen_time',
+                largeIcon: 'ic_launcher',
+                autoCancel: true,
+                attachments: undefined,
+                actionTypeId: '',
+                extra: null
+              }]
+            });
+            console.log('Approaching limit notification scheduled successfully');
+          } catch (error) {
+            console.error('Error scheduling approaching limit notification:', error);
+          }
+        } else {
+          console.log('No notification needed:', {
+            totalTime,
+            screenTimeLimit,
+            notificationFrequency,
+            approachingThreshold: screenTimeLimit - notificationFrequency,
+            timeUntilApproaching: (screenTimeLimit - notificationFrequency) - totalTime
+          });
         }
       } catch (error) {
         console.error('Error in checkScreenTimeLimit:', error);
@@ -659,64 +692,6 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     }
   };
 
-  // Add test app usage data for debugging
-  const addTestAppUsage = () => {
-    console.log('Adding test app usage data');
-    
-    // Create test data for common apps
-    const testApps: AppUsage[] = [
-      {
-        name: 'Duolingo',
-        time: 15, // 15 minutes
-        color: getCategoryColor('Education'),
-        category: 'Education',
-        lastUsed: new Date(),
-        isActive: false
-      },
-      {
-        name: 'YouTube',
-        time: 45, // 45 minutes
-        color: getCategoryColor('Entertainment'),
-        category: 'Entertainment',
-        lastUsed: new Date(Date.now() - 30 * 60 * 1000), // 30 minutes ago
-        isActive: false
-      },
-      {
-        name: 'Instagram',
-        time: 30, // 30 minutes
-        color: getCategoryColor('Social Media'),
-        category: 'Social Media',
-        lastUsed: new Date(Date.now() - 60 * 60 * 1000), // 1 hour ago
-        isActive: false
-      }
-    ];
-    
-    // Merge with existing data or replace if same app exists
-    const updatedData = [...appUsageData];
-    
-    testApps.forEach(testApp => {
-      const existingAppIndex = updatedData.findIndex(app => app.name === testApp.name);
-      
-      if (existingAppIndex >= 0) {
-        // Update existing app
-        updatedData[existingAppIndex] = {
-          ...updatedData[existingAppIndex],
-          time: updatedData[existingAppIndex].time + testApp.time,
-          lastUsed: testApp.lastUsed
-        };
-      } else {
-        // Add new app
-        updatedData.push(testApp);
-      }
-    });
-    
-    // Update state and localStorage
-    setAppUsageData(updatedData);
-    localStorage.setItem('appUsageData', JSON.stringify(updatedData));
-    
-    console.log('Test app usage data added successfully');
-  };
-
   return (
     <ScreenTimeContext.Provider
       value={{
@@ -735,7 +710,6 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
         resetDailyUsage,
         getAppUsageData,
         getLastHourUsage,
-        addTestAppUsage,
         updateAppUsageData
       }}
     >

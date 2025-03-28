@@ -10,6 +10,10 @@ interface BackgroundModePlugin {
   enable(): Promise<{ value: boolean }>;
   disable(): Promise<{ value: boolean }>;
   isEnabled(): Promise<{ value: boolean }>;
+  startTracking(): Promise<{ value: boolean }>;
+  stopTracking(): Promise<{ value: boolean }>;
+  getCurrentTime(): Promise<{ value: number }>;
+  resetTime(): Promise<{ value: boolean }>;
 }
 
 // Register the BackgroundMode plugin
@@ -20,6 +24,7 @@ class BackgroundService {
   private isInitialized = false;
   private updateInterval: number | null = null;
   private trackingCallback: (() => void) | null = null;
+  private lastUpdateTime: number = 0;
 
   private constructor() {
     // Private constructor to enforce singleton
@@ -44,7 +49,7 @@ class BackgroundService {
         return;
       }
 
-      // Enable background mode
+      // Enable background mode and start tracking
       this.enableBackgroundMode();
       
       this.isInitialized = true;
@@ -96,6 +101,12 @@ class BackgroundService {
       // Enable background mode
       const result = await BackgroundMode.enable();
       console.log('Background mode enabled:', result.value);
+      
+      if (result.value) {
+        // Start tracking
+        const trackingResult = await BackgroundMode.startTracking();
+        console.log('Tracking started:', trackingResult.value);
+      }
     } catch (error) {
       console.error('Error enabling background mode:', error);
     }
@@ -129,20 +140,28 @@ class BackgroundService {
       // Run the tracking callback immediately
       this.trackingCallback();
 
-      // Set up interval with a more conservative update frequency (30 seconds)
-      // to reduce battery usage and potential crashes
-      this.updateInterval = window.setInterval(() => {
+      // Set up interval with a more frequent update (15 seconds)
+      // to ensure accurate notifications
+      this.updateInterval = window.setInterval(async () => {
         try {
           if (this.trackingCallback) {
-            this.trackingCallback();
+            // Get current time from native service
+            const { value: currentTime } = await BackgroundMode.getCurrentTime();
+            
+            // Only update if time has changed
+            if (currentTime !== this.lastUpdateTime) {
+              this.lastUpdateTime = currentTime;
+              console.log('Background tracking update:', new Date().toISOString());
+              this.trackingCallback();
+            }
           }
         } catch (callbackError) {
           console.error('Error in tracking callback:', callbackError);
           // Don't let a single callback error crash the entire tracking
         }
-      }, 30000); // 30 seconds to reduce battery drain and potential crashes
+      }, 15000); // 15 seconds for more accurate tracking
 
-      console.log('Background tracking started with 30-second interval');
+      console.log('Background tracking started with 15-second interval');
     } catch (trackingError) {
       console.error('Error starting background tracking:', trackingError);
     }
@@ -165,6 +184,12 @@ class BackgroundService {
       this.stopBackgroundTracking();
       
       if (BackgroundMode) {
+        // Stop tracking in native service
+        BackgroundMode.stopTracking()
+          .then(() => console.log('Native tracking stopped'))
+          .catch(error => console.error('Error stopping native tracking:', error));
+          
+        // Disable background mode
         BackgroundMode.disable()
           .then(() => console.log('Background mode disabled'))
           .catch(error => console.error('Error disabling background mode:', error));

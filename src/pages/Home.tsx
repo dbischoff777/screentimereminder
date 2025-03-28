@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Container, Title, Text, Button, Divider, Box } from '@mantine/core';
+import { Container, Title, Text, Button, Divider, Box, Group } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import AppUsageTracker from '../services/AppUsageTracker';
-import { FiBarChart2, FiSettings } from 'react-icons/fi';
+import { FiBarChart2, FiSettings, FiBell } from 'react-icons/fi';
 
 // Welcome messages array
 const welcomeMessages = [
@@ -18,10 +18,121 @@ const Home = () => {
   const navigate = useNavigate();
   const [welcomeMessage, setWelcomeMessage] = useState('');
   const [appVersion, setAppVersion] = useState('');
-  const { usageAccessEnabled } = useScreenTime();
+  const { usageAccessEnabled, screenTimeLimit, notificationFrequency, getTotalScreenTime } = useScreenTime();
   
   // Get the tracker service instance
   const trackerService = AppUsageTracker.getInstance();
+
+  // Test notification function
+  const testNotification = async () => {
+    try {
+      const { LocalNotifications } = await import('@capacitor/local-notifications');
+      
+      // Check if notifications are permitted
+      const { display } = await LocalNotifications.checkPermissions();
+      if (display !== 'granted') {
+        console.log('Notifications permission not granted');
+        return;
+      }
+
+      // Schedule a test notification
+      await LocalNotifications.schedule({
+        notifications: [{
+          title: 'Test Notification',
+          body: `Total Screen Time: ${Math.round(getTotalScreenTime())} minutes\nScreen Time Limit: ${screenTimeLimit} minutes\nNotification Frequency: ${notificationFrequency} minutes`,
+          id: 999,
+          channelId: 'screen-time-alerts',
+          schedule: { at: new Date(Date.now() + 1000) },
+          sound: 'beep.wav',
+          smallIcon: 'ic_stat_screen_time',
+          largeIcon: 'ic_launcher',
+          autoCancel: true,
+          attachments: undefined,
+          actionTypeId: '',
+          extra: null
+        }]
+      });
+      
+      console.log('Test notification scheduled successfully');
+    } catch (error) {
+      console.error('Error scheduling test notification:', error);
+    }
+  };
+
+  // Test function to simulate reaching notification threshold
+  const testNotificationThreshold = async () => {
+    try {
+      const { LocalNotifications } = await import('@capacitor/local-notifications');
+      
+      // Check if notifications are permitted
+      const { display } = await LocalNotifications.checkPermissions();
+      if (display !== 'granted') {
+        console.log('Notifications permission not granted');
+        return;
+      }
+
+      // Get current screen time
+      const totalTime = getTotalScreenTime();
+      
+      console.log('Current screen time:', {
+        totalTime,
+        screenTimeLimit,
+        notificationFrequency,
+        approachingThreshold: screenTimeLimit - notificationFrequency,
+        currentTime: new Date().toISOString()
+      });
+
+      // Only schedule notifications if we're actually approaching or at the limit
+      if (totalTime >= (screenTimeLimit - notificationFrequency) && totalTime < screenTimeLimit) {
+        // Approaching limit notification
+        await LocalNotifications.schedule({
+          notifications: [{
+            title: 'Approaching Limit Test',
+            body: `Total Screen Time: ${Math.round(totalTime)} minutes\nDaily Limit: ${screenTimeLimit} minutes\n${Math.round(screenTimeLimit - totalTime)} minutes remaining`,
+            id: 998,
+            channelId: 'screen-time-alerts',
+            schedule: { at: new Date(Date.now() + 1000) },
+            sound: 'beep.wav',
+            smallIcon: 'ic_stat_screen_time',
+            largeIcon: 'ic_launcher',
+            autoCancel: true,
+            attachments: undefined,
+            actionTypeId: '',
+            extra: null
+          }]
+        });
+      } else if (totalTime >= screenTimeLimit) {
+        // Limit reached notification
+        await LocalNotifications.schedule({
+          notifications: [{
+            title: 'Limit Reached Test',
+            body: `Total Screen Time: ${Math.round(totalTime)} minutes\nDaily Limit: ${screenTimeLimit} minutes\nYou have reached your daily limit!`,
+            id: 997,
+            channelId: 'screen-time-alerts',
+            schedule: { at: new Date(Date.now() + 1000) },
+            sound: 'beep.wav',
+            smallIcon: 'ic_stat_screen_time',
+            largeIcon: 'ic_launcher',
+            autoCancel: true,
+            attachments: undefined,
+            actionTypeId: '',
+            extra: null
+          }]
+        });
+      } else {
+        console.log('Not at threshold yet:', {
+          totalTime,
+          screenTimeLimit,
+          notificationFrequency,
+          approachingThreshold: screenTimeLimit - notificationFrequency
+        });
+      }
+      
+      console.log('Test threshold notifications scheduled successfully');
+    } catch (error) {
+      console.error('Error scheduling test threshold notifications:', error);
+    }
+  };
 
   useEffect(() => {
     // Select a random welcome message
@@ -99,6 +210,36 @@ const Home = () => {
         >
           {welcomeMessage}
         </Text>
+
+        {/* Test Buttons */}
+        <Box mb="xl">
+          <Group align="center" gap="md">
+            <Button
+              size="md"
+              onClick={testNotification}
+              style={{
+                background: 'linear-gradient(45deg, #FF00FF, #00FFFF)',
+                color: '#000',
+                fontWeight: 'bold',
+              }}
+            >
+              <FiBell style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} />
+              Test Notification
+            </Button>
+            <Button
+              size="md"
+              onClick={testNotificationThreshold}
+              style={{
+                background: 'linear-gradient(45deg, #00FFFF, #FF00FF)',
+                color: '#000',
+                fontWeight: 'bold',
+              }}
+            >
+              <FiBell style={{ marginRight: '0.5rem', verticalAlign: 'middle' }} />
+              Test Threshold
+            </Button>
+          </Group>
+        </Box>
 
         {/* Usage Access Permission Section */}
         <Box mt="xl" style={{ marginTop: '2rem' }}>
