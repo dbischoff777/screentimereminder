@@ -103,6 +103,7 @@ const Settings = () => {
 
   const handleSaveSettings = async () => {
     console.log('Save Settings clicked. Notification state:', notificationsEnabled, 'Previous state:', previousNotificationState);
+    console.log('Current screen time limit:', screenTimeLimit);
     
     // Handle notification permissions for mobile devices
     if (notificationsEnabled) {
@@ -145,6 +146,7 @@ const Settings = () => {
     
     // If we've made it here, all permissions are handled
     // Show a success message or navigate back to home
+    console.log('Settings saved successfully. New screen time limit:', screenTimeLimit);
     alert('Settings saved successfully!');
     navigate('/');
   };
@@ -205,7 +207,10 @@ const Settings = () => {
         </Text>
         <NumberInput
           value={screenTimeLimit}
-          onChange={(val) => setScreenTimeLimit(Number(val) || 0)}
+          onChange={(val) => {
+            console.log('Screen time limit changed from:', screenTimeLimit, 'to:', val);
+            setScreenTimeLimit(Number(val) || 0);
+          }}
           min={5}
           max={1440}
           step={5}
