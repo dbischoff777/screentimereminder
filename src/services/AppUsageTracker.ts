@@ -29,18 +29,25 @@ export interface AppUsageTrackerPlugin {
   removeAllListeners(): Promise<void>;
   isBatteryOptimizationExempt(): Promise<{ value: boolean }>;
   requestBatteryOptimizationExemption(): Promise<void>;
+  checkScreenTimeLimit(params: {
+    totalTime: number;
+    limit: number;
+    remainingMinutes: number;
+  }): Promise<{ value: boolean }>;
 }
 
 // Register the AppUsageTracker plugin
 const AppUsageTracker = registerPlugin<AppUsageTrackerPlugin>('AppUsageTracker');
 
 // Create a class to handle app usage tracking
-class AppUsageTrackerService {
+export default class AppUsageTrackerService {
   private static instance: AppUsageTrackerService;
   private isTracking = false;
   private listeners: Array<(usageData: AppUsage[]) => void> = [];
+  private plugin: any;
 
   private constructor() {
+    this.plugin = AppUsageTracker;
     // Private constructor to enforce singleton
     this.setupBroadcastListener();
   }
@@ -437,6 +444,18 @@ class AppUsageTrackerService {
       throw error;
     }
   }
-}
 
-export default AppUsageTrackerService; 
+  public async checkScreenTimeLimit(params: {
+    totalTime: number;
+    limit: number;
+    remainingMinutes: number;
+  }): Promise<boolean> {
+    try {
+      const result = await this.plugin.checkScreenTimeLimit(params);
+      return result.value;
+    } catch (error) {
+      console.error('Error checking screen time limit:', error);
+      throw error;
+    }
+  }
+} 

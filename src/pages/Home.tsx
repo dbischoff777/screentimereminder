@@ -82,14 +82,19 @@ const Home = () => {
         currentTime: new Date().toISOString()
       });
 
-      // Only schedule notifications if we're actually approaching or at the limit
-      if (totalTime >= (screenTimeLimit - notificationFrequency) && totalTime < screenTimeLimit) {
-        // Approaching limit notification
+      // Cancel any existing notifications first
+      await LocalNotifications.cancel({ notifications: [{ id: 1 }, { id: 2 }] });
+
+      // If we're approaching the limit
+      if (screenTimeLimit - totalTime <= notificationFrequency) {
+        const minutesRemaining = Math.round(screenTimeLimit - totalTime);
+        console.log(`Approaching limit - Total: ${totalTime}min, Limit: ${screenTimeLimit}min, Remaining: ${minutesRemaining}min`);
+        
         await LocalNotifications.schedule({
           notifications: [{
-            title: 'Approaching Limit Test',
-            body: `Total Screen Time: ${Math.round(totalTime)} minutes\nDaily Limit: ${screenTimeLimit} minutes\n${Math.round(screenTimeLimit - totalTime)} minutes remaining`,
-            id: 998,
+            title: 'Screen Time Limit Approaching',
+            body: `Total Screen Time: ${Math.round(totalTime)} minutes\nDaily Limit: ${screenTimeLimit} minutes\n${minutesRemaining} minutes remaining`,
+            id: 1,
             channelId: 'screen-time-alerts',
             schedule: { at: new Date(Date.now() + 1000) },
             sound: 'beep.wav',
@@ -101,34 +106,32 @@ const Home = () => {
             extra: null
           }]
         });
-      } else if (totalTime >= screenTimeLimit) {
-        // Limit reached notification
-        await LocalNotifications.schedule({
-          notifications: [{
-            title: 'Limit Reached Test',
-            body: `Total Screen Time: ${Math.round(totalTime)} minutes\nDaily Limit: ${screenTimeLimit} minutes\nYou have reached your daily limit!`,
-            id: 997,
-            channelId: 'screen-time-alerts',
-            schedule: { at: new Date(Date.now() + 1000) },
-            sound: 'beep.wav',
-            smallIcon: 'ic_stat_screen_time',
-            largeIcon: 'ic_launcher',
-            autoCancel: true,
-            attachments: undefined,
-            actionTypeId: '',
-            extra: null
-          }]
-        });
-      } else {
-        console.log('Not at threshold yet:', {
-          totalTime,
-          screenTimeLimit,
-          notificationFrequency,
-          approachingThreshold: screenTimeLimit - notificationFrequency
-        });
+        console.log('Approaching limit notification scheduled successfully');
       }
-      
-      console.log('Test threshold notifications scheduled successfully');
+      // If we're over the limit
+      else if (totalTime > screenTimeLimit) {
+        console.log(`Over limit - Total: ${totalTime}min, Limit: ${screenTimeLimit}min`);
+        
+        await LocalNotifications.schedule({
+          notifications: [{
+            title: 'Screen Time Limit Reached',
+            body: `Total Screen Time: ${Math.round(totalTime)} minutes\nDaily Limit: ${screenTimeLimit} minutes\nYou have exceeded your daily limit!`,
+            id: 2,
+            channelId: 'screen-time-alerts',
+            schedule: { at: new Date(Date.now() + 1000) },
+            sound: 'beep.wav',
+            smallIcon: 'ic_stat_screen_time',
+            largeIcon: 'ic_launcher',
+            autoCancel: true,
+            attachments: undefined,
+            actionTypeId: '',
+            extra: null
+          }]
+        });
+        console.log('Over limit notification scheduled successfully');
+      } else {
+        console.log(`No notification needed - Total: ${totalTime}min, Limit: ${screenTimeLimit}min, Next check at: ${screenTimeLimit - notificationFrequency}min`);
+      }
     } catch (error) {
       console.error('Error scheduling test threshold notifications:', error);
     }

@@ -44,6 +44,7 @@ public class AppUsageTracker extends Plugin {
     private ScheduledExecutorService scheduler;
     private String currentForegroundApp = "";
     private Handler mainHandler;
+    private NotificationService notificationService;
     
     @Override
     public void load() {
@@ -53,6 +54,9 @@ public class AppUsageTracker extends Plugin {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
             usageStatsManager = (UsageStatsManager) getContext().getSystemService(Context.USAGE_STATS_SERVICE);
         }
+        
+        // Initialize notification service
+        notificationService = new NotificationService(getContext());
     }
     
     /**
@@ -330,6 +334,41 @@ public class AppUsageTracker extends Plugin {
         } catch (Exception e) {
             Log.e(TAG, "Error requesting battery optimization exemption", e);
             call.reject("Failed to request battery optimization exemption", e);
+        }
+    }
+    
+    /**
+     * Check if the app has reached the screen time limit
+     */
+    @PluginMethod
+    public void checkScreenTimeLimit(PluginCall call) {
+        try {
+            int totalTime = call.getInt("totalTime");
+            int limit = call.getInt("limit");
+            int remainingMinutes = call.getInt("remainingMinutes");
+            
+            Log.d(TAG, String.format("Checking screen time limit - Total: %d, Limit: %d, Remaining: %d", 
+                totalTime, limit, remainingMinutes));
+            
+            // Cancel any existing notifications first
+            notificationService.cancelAllNotifications();
+            
+            if (totalTime >= limit) {
+                // Show limit reached notification
+                notificationService.showLimitReachedNotification(totalTime, limit);
+                Log.d(TAG, "Screen time limit reached notification sent");
+            } else if (remainingMinutes <= 5) {
+                // Show approaching limit notification
+                notificationService.showApproachingLimitNotification(totalTime, limit, remainingMinutes);
+                Log.d(TAG, "Approaching limit notification sent");
+            }
+            
+            JSObject ret = new JSObject();
+            ret.put("value", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking screen time limit", e);
+            call.reject("Failed to check screen time limit", e);
         }
     }
     

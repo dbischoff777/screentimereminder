@@ -3,6 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
+import BackgroundService from '../services/BackgroundService';
 
 const Statistics = () => {
   const { 
@@ -41,7 +42,24 @@ const Statistics = () => {
   }, [appUsageData, screenTimeLimit, getTotalScreenTime]);
 
   useEffect(() => {
+    // Initialize background service and set up tracking
+    const backgroundService = BackgroundService.getInstance();
+    backgroundService.initialize();
+    
+    // Set up the tracking callback
+    backgroundService.setTrackingCallback(() => {
+      console.log('Background tracking update received');
+      refreshData();
+    });
+
+    // Initial data refresh
     refreshData();
+
+    // Cleanup on unmount
+    return () => {
+      backgroundService.setTrackingCallback(null);
+      backgroundService.disableBackgroundMode();
+    };
   }, []);
   
   const refreshData = async () => {
@@ -53,11 +71,6 @@ const Statistics = () => {
       
       if (success) {
         console.log('Successfully updated app usage data');
-        
-        // Show success notification briefly
-        setTimeout(() => {
-          // No need to reset showResetNotification as it's no longer used
-        }, 3000);
       } else {
         console.log('Failed to update app usage data');
         
