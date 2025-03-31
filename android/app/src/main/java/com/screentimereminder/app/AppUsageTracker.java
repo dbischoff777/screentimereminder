@@ -343,32 +343,67 @@ public class AppUsageTracker extends Plugin {
     @PluginMethod
     public void checkScreenTimeLimit(PluginCall call) {
         try {
-            int totalTime = call.getInt("totalTime");
-            int limit = call.getInt("limit");
-            int remainingMinutes = call.getInt("remainingMinutes");
+            // Get parameters with null checks and default values
+            Integer totalTime = call.getInt("totalTime");
+            Integer limit = call.getInt("limit");
+            Integer remainingMinutes = call.getInt("remainingMinutes");
             
-            Log.d(TAG, String.format("Checking screen time limit - Total: %d, Limit: %d, Remaining: %d", 
+            // Log the raw values for debugging
+            Log.d(TAG, String.format("Raw parameters - Total: %s, Limit: %s, Remaining: %s", 
+                totalTime, limit, remainingMinutes));
+            
+            // Validate parameters and provide default values if null
+            if (totalTime == null) {
+                Log.e(TAG, "totalTime is null, using default value 0");
+                totalTime = 0;
+            }
+            if (limit == null || limit <= 0) {
+                Log.e(TAG, "limit is null or invalid, using default value 120");
+                limit = 120;
+            }
+            if (remainingMinutes == null) {
+                Log.e(TAG, "remainingMinutes is null, calculating from totalTime and limit");
+                remainingMinutes = limit - totalTime;
+            }
+            
+            Log.d(TAG, String.format("Processed parameters - Total: %d, Limit: %d, Remaining: %d", 
                 totalTime, limit, remainingMinutes));
             
             // Cancel any existing notifications first
-            notificationService.cancelAllNotifications();
+            try {
+                notificationService.cancelAllNotifications();
+                Log.d(TAG, "Existing notifications cancelled");
+            } catch (Exception e) {
+                Log.e(TAG, "Error cancelling existing notifications", e);
+            }
             
             if (totalTime >= limit) {
                 // Show limit reached notification
-                notificationService.showLimitReachedNotification(totalTime, limit);
-                Log.d(TAG, "Screen time limit reached notification sent");
+                try {
+                    notificationService.showLimitReachedNotification(totalTime, limit);
+                    Log.d(TAG, "Limit reached notification sent successfully");
+                } catch (Exception e) {
+                    Log.e(TAG, "Error showing limit reached notification", e);
+                    throw e;
+                }
             } else if (remainingMinutes <= 5) {
                 // Show approaching limit notification
-                notificationService.showApproachingLimitNotification(totalTime, limit, remainingMinutes);
-                Log.d(TAG, "Approaching limit notification sent");
+                try {
+                    notificationService.showApproachingLimitNotification(totalTime, limit, remainingMinutes);
+                    Log.d(TAG, "Approaching limit notification sent successfully");
+                } catch (Exception e) {
+                    Log.e(TAG, "Error showing approaching limit notification", e);
+                    throw e;
+                }
             }
             
             JSObject ret = new JSObject();
             ret.put("value", true);
             call.resolve(ret);
+            Log.d(TAG, "checkScreenTimeLimit completed successfully");
         } catch (Exception e) {
-            Log.e(TAG, "Error checking screen time limit", e);
-            call.reject("Failed to check screen time limit", e);
+            Log.e(TAG, "Error in checkScreenTimeLimit", e);
+            call.reject("Failed to check screen time limit: " + e.getMessage(), e);
         }
     }
     

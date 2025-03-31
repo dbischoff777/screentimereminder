@@ -524,35 +524,79 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     initializeApp();
   }, []);
 
-  // Update the checkScreenTimeLimit function to be more reliable on real devices
+  // Add this function near the top of the file, after the imports
+  const logError = (error: string) => {
+    try {
+      const errors = JSON.parse(localStorage.getItem('debugErrors') || '[]');
+      // Keep only the last 10 errors
+      errors.unshift(error);
+      if (errors.length > 10) {
+        errors.pop();
+      }
+      localStorage.setItem('debugErrors', JSON.stringify(errors));
+    } catch (e) {
+      console.error('Error logging debug error:', e);
+    }
+  };
+
+  // Update the checkScreenTimeLimit function to log errors
   const checkScreenTimeLimit = async () => {
     try {
-      const totalTime = await getTotalScreenTime();
-      const remainingMinutes = screenTimeLimit - totalTime;
+      console.log('Starting screen time limit check...');
       
-      console.log('Checking screen time limit:', {
-        totalTime,
-        screenTimeLimit,
-        remainingMinutes,
-        notificationsEnabled
-      });
-
+      // Get total screen time
+      const totalTime = getTotalScreenTime();
+      console.log('Total screen time calculated:', totalTime);
+      
+      // Ensure we have valid values
+      if (typeof totalTime !== 'number' || isNaN(totalTime)) {
+        console.error('Invalid total time:', totalTime);
+        logError('Invalid total time calculated');
+        return;
+      }
+      
+      if (typeof screenTimeLimit !== 'number' || screenTimeLimit <= 0) {
+        console.error('Invalid screen time limit:', screenTimeLimit);
+        logError('Invalid screen time limit');
+        return;
+      }
+      
+      const remainingMinutes = Math.max(0, screenTimeLimit - totalTime);
+      console.log('Remaining minutes:', remainingMinutes);
+      
       if (!notificationsEnabled) {
+        console.log('Notifications are disabled, skipping check');
         return;
       }
 
       // Use native notification method
       const appUsageTracker = AppUsageTrackerService.getInstance();
-      await appUsageTracker.checkScreenTimeLimit({
-        totalTime,
-        limit: screenTimeLimit,
-        remainingMinutes
+      console.log('Calling native checkScreenTimeLimit with params:', {
+        totalTime: Math.round(totalTime),
+        limit: Math.round(screenTimeLimit),
+        remainingMinutes: Math.round(remainingMinutes)
       });
+      
+      try {
+        await appUsageTracker.checkScreenTimeLimit({
+          totalTime: Math.round(totalTime),
+          limit: Math.round(screenTimeLimit),
+          remainingMinutes: Math.round(remainingMinutes)
+        });
+        console.log('Native checkScreenTimeLimit completed successfully');
+      } catch (nativeError: any) {
+        console.error('Native checkScreenTimeLimit failed:', nativeError);
+        throw new Error(`Native check failed: ${nativeError.message}`);
+      }
 
       // Update localStorage to force UI update
       localStorage.setItem('lastScreenTimeCheck', Date.now().toString());
-    } catch (error) {
-      console.error('Error checking screen time limit:', error);
+      console.log('Screen time check completed successfully');
+    } catch (error: any) {
+      console.error('Error in checkScreenTimeLimit:', error);
+      logError(`Screen time limit check failed: ${error.message}`);
+      // Log additional context
+      logError(`Context: totalTime=${getTotalScreenTime()}, limit=${screenTimeLimit}, notifications=${notificationsEnabled}`);
     }
   };
 
@@ -578,7 +622,7 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     }
   };
 
-  // Update app usage data with fresh data from the system
+  // Update the updateAppUsageData function to log errors
   const updateAppUsageData = async (): Promise<boolean> => {
     try {
       console.log('ScreenTimeContext: Updating app usage data with fresh data from system');
@@ -589,6 +633,7 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
       
       if (!hasPermission) {
         console.log('No permission to access usage data, cannot update');
+        logError('No permission to access usage data');
         return false;
       }
       
@@ -603,6 +648,7 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
       
       if (!latestData || latestData.length === 0) {
         console.log('No app usage data found for today');
+        logError('No app usage data found for today');
         return false;
       }
       
@@ -630,13 +676,15 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
       try {
         await checkScreenTimeLimit();
         console.log('Screen time limit check completed after data update');
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error checking screen time limit after data update:', error);
+        logError(`Screen time limit check failed after data update: ${error.message}`);
       }
       
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating app usage data:', error);
+      logError(`Failed to update app usage data: ${error.message}`);
       return false;
     }
   };
