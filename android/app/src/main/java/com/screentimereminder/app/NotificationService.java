@@ -64,7 +64,8 @@ public class NotificationService {
             .setContentText(String.format("Total Screen Time: %d minutes\nDaily Limit: %d minutes\n%d minutes remaining", 
                 totalTime, limit, remainingMinutes))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
+            .setAutoCancel(false)
+            .setOngoing(true)
             .setVibrate(new long[]{100, 200, 300, 400, 500})
             .setLights(android.graphics.Color.BLUE, 1000, 1000)
             .setContentIntent(pendingIntent);
@@ -91,7 +92,8 @@ public class NotificationService {
             .setContentText(String.format("Total Screen Time: %d minutes\nDaily Limit: %d minutes\nYou have reached your daily limit!", 
                 totalTime, limit))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
+            .setAutoCancel(false)
+            .setOngoing(true)
             .setVibrate(new long[]{100, 200, 300, 400, 500})
             .setLights(android.graphics.Color.RED, 1000, 1000)
             .setContentIntent(pendingIntent);
