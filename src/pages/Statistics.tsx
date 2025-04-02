@@ -1,4 +1,4 @@
-import { Container, Title, Text, Grid, RingProgress, Badge } from '@mantine/core';
+import { Container, Title, Text, Grid, RingProgress, Badge, Tabs } from '@mantine/core';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect } from 'react';
@@ -14,6 +14,7 @@ const Statistics = () => {
   } = useScreenTime();
   const [totalScreenTime, setTotalScreenTime] = useState(0);
   const [percentOfLimit, setPercentOfLimit] = useState(0);
+  const [activeTab, setActiveTab] = useState('timeline');
   const location = useLocation();
   
   // Check if we're coming from the settings page after a reset
@@ -88,6 +89,57 @@ const Statistics = () => {
     }
   };
 
+  // Filter and sort current day's data
+  const getCurrentDayData = () => {
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    return [...appUsageData]
+      .filter(app => {
+        const appTime = app.lastUsed ? new Date(app.lastUsed) : null;
+        return appTime && appTime >= startOfDay && appTime <= endOfDay;
+      })
+      .sort((a, b) => {
+        // Sort by lastUsed timestamp in descending order (newest first)
+        const timeA = a.lastUsed ? new Date(a.lastUsed).getTime() : 0;
+        const timeB = b.lastUsed ? new Date(b.lastUsed).getTime() : 0;
+        return timeB - timeA;
+      });
+  };
+
+  const sortedTimelineData = getCurrentDayData();
+
+  // Format time for display (e.g., "2 minutes 24 seconds")
+  const formatDetailedTime = (minutes: number) => {
+    if (minutes < 1/60) { // Less than 1 minute
+      const seconds = Math.round(minutes * 60);
+      return `${seconds} second${seconds !== 1 ? 's' : ''}`;
+    } else if (minutes < 1) { // Less than 1 minute but more than 1 second
+      const seconds = Math.round(minutes * 60);
+      return `${seconds} second${seconds !== 1 ? 's' : ''}`;
+    } else if (minutes < 60) { // Less than 1 hour
+      const mins = Math.floor(minutes);
+      const secs = Math.round((minutes - mins) * 60);
+      return secs > 0 ? `${mins} minute${mins !== 1 ? 's' : ''} ${secs} second${secs !== 1 ? 's' : ''}` : `${mins} minute${mins !== 1 ? 's' : ''}`;
+    } else { // 1 hour or more
+      const hours = Math.floor(minutes / 60);
+      const mins = Math.round(minutes % 60);
+      return mins > 0 ? `${hours} hour${hours !== 1 ? 's' : ''} ${mins} minute${mins !== 1 ? 's' : ''}` : `${hours} hour${hours !== 1 ? 's' : ''}`;
+    }
+  };
+
+  // Format time for timeline (HH:mm)
+  const formatTimelineTime = (timestamp: Date | string | null | undefined) => {
+    if (!timestamp) return '--:--';
+    const date = typeof timestamp === 'string' ? new Date(timestamp) : timestamp;
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+  };
+
   // Sort apps by usage time (descending) and filter out apps with less than 5% usage
   const sortedApps = [...appUsageData]
     .filter(app => {
@@ -159,7 +211,7 @@ const Statistics = () => {
         order={1}
         style={{
           fontSize: '2rem',
-          marginBottom: '2rem',
+          marginBottom: '1rem',
           color: '#00FFFF',
           textShadow: '0 0 10px #00FFFF',
           textAlign: 'center',
@@ -167,6 +219,167 @@ const Statistics = () => {
       >
         SCREEN TIME ANALYTICS
       </Title>
+
+      <Tabs
+        value={activeTab}
+        onChange={(value) => setActiveTab(value as string)}
+        style={{ marginBottom: '2rem' }}
+        styles={{
+          root: {
+            borderBottom: '1px solid #FF00FF',
+          },
+          tab: {
+            color: '#00FFFF',
+            fontSize: '1rem',
+            padding: '1rem 2rem',
+            '&[data-active]': {
+              color: '#FF00FF',
+              borderColor: '#FF00FF',
+            },
+          },
+          panel: {
+            color: '#00FFFF',
+            padding: '1rem 0',
+          },
+        }}
+      >
+        <Tabs.List grow>
+          <Tabs.Tab value="heatmap">HEATMAP VIEW</Tabs.Tab>
+          <Tabs.Tab value="timeline">TIMELINE VIEW</Tabs.Tab>
+          <Tabs.Tab value="detailed">DETAILED VIEW</Tabs.Tab>
+        </Tabs.List>
+
+        <Tabs.Panel value="timeline">
+          <Title
+            order={2}
+            style={{
+              fontSize: '1.5rem',
+              marginBottom: '0.5rem',
+              color: '#00FFFF',
+            }}
+          >
+            Usage history
+          </Title>
+          <Text size="sm" style={{ color: '#AAAAAA', marginBottom: '2rem' }}>
+            Daily
+          </Text>
+
+          <div style={{ maxHeight: '600px', overflowY: 'auto', padding: '0 1rem' }}>
+            {sortedTimelineData.length === 0 ? (
+              <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
+                No activity history available for today.
+              </Text>
+            ) : (
+              <div style={{ position: 'relative' }}>
+                {/* Date header */}
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  marginBottom: '1.5rem',
+                  marginLeft: '80px'
+                }}>
+                  <Text style={{ color: '#FFFFFF', fontWeight: 500 }}>
+                    {new Date().toLocaleDateString('en-US', { 
+                      year: 'numeric',
+                      month: 'long',
+                      day: 'numeric'
+                    })}
+                  </Text>
+                </div>
+
+                {/* Timeline entries */}
+                <div style={{ position: 'relative' }}>
+                  {/* Continuous timeline line */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      left: '80px',
+                      top: 0,
+                      bottom: 0,
+                      width: '2px',
+                      background: '#FF4444',
+                    }}
+                  />
+                  
+                  {sortedTimelineData.map((app, index) => (
+                    <div
+                      key={index}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        marginBottom: '1.5rem',
+                        position: 'relative',
+                      }}
+                    >
+                      {/* Time */}
+                      <Text style={{ 
+                        width: '60px', 
+                        color: '#333333',
+                        fontSize: '0.9rem',
+                        marginRight: '20px',
+                        textAlign: 'right',
+                        fontWeight: 500
+                      }}>
+                        {formatTimelineTime(app.lastUsed)}
+                      </Text>
+                      
+                      {/* App icon container */}
+                      <div style={{
+                        position: 'relative',
+                        zIndex: 2,
+                        background: '#FFFFFF',
+                        borderRadius: '50%',
+                        padding: '2px',
+                        marginRight: '16px'
+                      }}>
+                        <div style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '50%',
+                          background: app.color,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '16px',
+                          color: '#FFFFFF'
+                        }}>
+                          {app.name.charAt(0)}
+                        </div>
+                      </div>
+                      
+                      {/* App info */}
+                      <div style={{ flex: 1 }}>
+                        <Text style={{ 
+                          color: '#FFFFFF', 
+                          fontWeight: 500,
+                          marginBottom: '4px'
+                        }}>
+                          {app.name}
+                        </Text>
+                        <Text size="sm" style={{ color: '#AAAAAA' }}>
+                          {formatDetailedTime(app.time)}
+                        </Text>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="heatmap">
+          <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
+            Heatmap view coming soon
+          </Text>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="detailed">
+          <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
+            Detailed view coming soon
+          </Text>
+        </Tabs.Panel>
+      </Tabs>
 
       {/* Daily Limit Progress Section */}
       <div
@@ -176,7 +389,6 @@ const Statistics = () => {
           borderTop: '1px solid #FF00FF',
           borderBottom: '1px solid #FF00FF',
           marginBottom: '1.5rem',
-          marginTop: '40px' // Add margin to avoid overlap with permission indicator
         }}
       >
         <Grid>
