@@ -176,7 +176,7 @@ public class AppUsageTracker extends Plugin {
                             } catch (Exception e) {
                                 Log.e(TAG, "Error showing limit reached notification", e);
                             }
-                        } else if (totalMinutes >= (screenTimeLimit - 5) && canShowApproaching) {
+                        } else if (totalMinutes < screenTimeLimit && totalMinutes >= (screenTimeLimit - 5) && canShowApproaching) {
                             // Show approaching limit notification
                             try {
                                 notificationService.showApproachingLimitNotification(totalMinutes, screenTimeLimit, Math.max(0, screenTimeLimit - totalMinutes));
