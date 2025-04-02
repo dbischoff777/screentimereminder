@@ -1,4 +1,4 @@
-import { Container, Title, Text, Grid, RingProgress, Badge, Tabs } from '@mantine/core';
+import { Container, Title, Text, Grid, RingProgress, Badge, Tabs, Paper } from '@mantine/core';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect } from 'react';
@@ -195,6 +195,83 @@ const Statistics = () => {
     checkPermission();
   }, []);
 
+  // Generate heatmap data with proper intensity values
+  const generateHeatmapData = () => {
+    const hourlyData = Array(24).fill(0);
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    // Get today's data
+    const todayData = appUsageData.filter(app => {
+      const usageTime = app.lastUsed ? new Date(app.lastUsed) : null;
+      return usageTime && usageTime >= startOfDay && usageTime <= endOfDay;
+    });
+
+    // Aggregate usage by hour
+    todayData.forEach(app => {
+      if (!app.lastUsed) return;
+      const usageTime = new Date(app.lastUsed);
+      const hour = usageTime.getHours();
+      hourlyData[hour] += app.time || 0;
+    });
+
+    return hourlyData;
+  };
+
+  // Get the maximum usage for scaling
+  const getMaxUsage = (data: number[]) => {
+    return Math.max(...data, 0.1); // Avoid division by zero
+  };
+
+  // Format hour for display
+  const formatHour = (hour: number) => {
+    return `${hour.toString().padStart(2, '0')}:00`;
+  };
+
+  const heatmapData = generateHeatmapData();
+  const maxUsage = getMaxUsage(heatmapData);
+
+  // Get color based on intensity
+  const getHeatmapColor = (value: number, maxValue: number) => {
+    if (value === 0) return 'rgba(240, 240, 255, 0.05)';
+    
+    const ratio = value / maxValue;
+    
+    // Define gradient colors
+    const colors = {
+      low: { r: 200, g: 200, b: 255 },
+      medium: { r: 100, g: 255, b: 100 },
+      high: { r: 255, g: 50, b: 50 }
+    };
+
+    let startColor, endColor, localRatio;
+
+    if (ratio < 0.3) {
+      // Cool blue range
+      startColor = { r: 240, g: 240, b: 255 };
+      endColor = colors.low;
+      localRatio = ratio / 0.3;
+    } else if (ratio < 0.6) {
+      // Blue to green range
+      startColor = colors.low;
+      endColor = colors.medium;
+      localRatio = (ratio - 0.3) / 0.3;
+    } else {
+      // Green to red range
+      startColor = colors.medium;
+      endColor = colors.high;
+      localRatio = (ratio - 0.6) / 0.4;
+    }
+
+    // Interpolate between colors
+    const r = Math.round(startColor.r + (endColor.r - startColor.r) * localRatio);
+    const g = Math.round(startColor.g + (endColor.g - startColor.g) * localRatio);
+    const b = Math.round(startColor.b + (endColor.b - startColor.b) * localRatio);
+
+    return `rgba(${r}, ${g}, ${b}, ${0.3 + ratio * 0.7})`;
+  };
+
   return (
     <Container 
       size="md" 
@@ -227,6 +304,8 @@ const Statistics = () => {
         styles={{
           root: {
             borderBottom: '1px solid #FF00FF',
+            maxWidth: '100%',
+            overflow: 'hidden'
           },
           tab: {
             color: '#00FFFF',
@@ -369,9 +448,203 @@ const Statistics = () => {
         </Tabs.Panel>
 
         <Tabs.Panel value="heatmap">
-          <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
-            Heatmap view coming soon
-          </Text>
+          <div style={{ 
+            maxWidth: '100%',
+            margin: '0 auto',
+            padding: '0 1rem'
+          }}>
+            <Title
+              order={2}
+              style={{
+                fontSize: '1.5rem',
+                marginBottom: '0.5rem',
+                color: '#00FFFF',
+              }}
+            >
+              Usage Heatmap
+            </Title>
+            <Text size="sm" style={{ color: '#AAAAAA', marginBottom: '1rem' }}>
+              Daily activity pattern
+            </Text>
+
+            {/* Total usage circle */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'center',
+              marginBottom: '2rem'
+            }}>
+              <div style={{
+                width: '120px',
+                height: '120px',
+                borderRadius: '50%',
+                background: '#6B46C1',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#FFFFFF',
+              }}>
+                <Text size="xl" fw={700}>
+                  {Math.floor(totalScreenTime / 60)}h
+                </Text>
+                <Text size="sm">
+                  {Math.round(totalScreenTime % 60)}m
+                </Text>
+              </div>
+            </div>
+
+            <div style={{ 
+              width: '100%',
+              overflowX: 'auto',
+              overflowY: 'hidden',
+              padding: '1rem 0'
+            }}>
+              {heatmapData.every(value => value === 0) ? (
+                <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
+                  No activity data available for today.
+                </Text>
+              ) : (
+                <>
+                  <div style={{ 
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(24, minmax(60px, 1fr))',
+                    gap: '4px',
+                    marginBottom: '2rem',
+                    background: 'rgba(0, 0, 20, 0.3)',
+                    padding: '16px',
+                    borderRadius: '8px',
+                    minWidth: 'fit-content'
+                  }}>
+                    {heatmapData.map((value, hour) => {
+                      const bgColor = getHeatmapColor(value, maxUsage);
+                      return (
+                        <div
+                          key={hour}
+                          style={{
+                            aspectRatio: '1',
+                            backgroundColor: bgColor,
+                            padding: '8px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            transition: 'all 0.2s ease',
+                            position: 'relative',
+                            boxShadow: value > 0 ? '0 0 15px rgba(255, 255, 255, 0.1)' : 'none',
+                            minWidth: '60px',
+                            borderRadius: '4px',
+                            transform: 'scale(1)'
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.transform = 'scale(1.05)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.transform = 'scale(1)';
+                          }}
+                        >
+                          <Text 
+                            size="sm" 
+                            style={{ 
+                              color: '#FFFFFF',
+                              fontWeight: 500,
+                              marginBottom: '2px',
+                              textShadow: value > maxUsage / 2 ? '0 0 4px rgba(0,0,0,0.5)' : 'none'
+                            }}
+                          >
+                            {formatHour(hour)}
+                          </Text>
+                          <Text 
+                            size="xs" 
+                            style={{ 
+                              color: '#FFFFFF',
+                              opacity: 0.8,
+                              textShadow: value > maxUsage / 2 ? '0 0 4px rgba(0,0,0,0.5)' : 'none'
+                            }}
+                          >
+                            {value > 0 ? `${Math.round(value)}m` : '-'}
+                          </Text>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Legend */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '24px',
+                    marginBottom: '2rem',
+                    flexWrap: 'wrap'
+                  }}>
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center',
+                      gap: '8px' 
+                    }}>
+                      <div style={{
+                        width: '16px',
+                        height: '16px',
+                        backgroundColor: getHeatmapColor(maxUsage * 0.15, maxUsage),
+                        borderRadius: '2px'
+                      }} />
+                      <Text size="sm" style={{ color: '#AAAAAA' }}>
+                        Low ({`< ${Math.round(maxUsage / 3)}m`})
+                      </Text>
+                    </div>
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}>
+                      <div style={{
+                        width: '16px',
+                        height: '16px',
+                        backgroundColor: getHeatmapColor(maxUsage * 0.45, maxUsage),
+                        borderRadius: '2px'
+                      }} />
+                      <Text size="sm" style={{ color: '#AAAAAA' }}>
+                        Medium ({`${Math.round(maxUsage / 3)}m - ${Math.round(maxUsage * 2 / 3)}m`})
+                      </Text>
+                    </div>
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}>
+                      <div style={{
+                        width: '16px',
+                        height: '16px',
+                        backgroundColor: getHeatmapColor(maxUsage * 0.8, maxUsage),
+                        borderRadius: '2px'
+                      }} />
+                      <Text size="sm" style={{ color: '#AAAAAA' }}>
+                        High ({`> ${Math.round(maxUsage * 2 / 3)}m`})
+                      </Text>
+                    </div>
+                  </div>
+
+                  {/* Summary */}
+                  <Paper
+                    style={{
+                      background: 'rgba(0, 0, 40, 0.3)',
+                      padding: '1.5rem',
+                      marginBottom: '1rem',
+                      borderRadius: '8px'
+                    }}
+                  >
+                    <Text style={{ color: '#FFFFFF', marginBottom: '0.5rem', fontSize: '1.1rem' }}>
+                      Peak Usage Time: {formatHour(heatmapData.indexOf(maxUsage))}
+                    </Text>
+                    <Text style={{ color: '#AAAAAA' }}>
+                      Most active hour with {Math.round(maxUsage)} minutes of screen time
+                    </Text>
+                  </Paper>
+                </>
+              )}
+            </div>
+          </div>
         </Tabs.Panel>
 
         <Tabs.Panel value="detailed">
