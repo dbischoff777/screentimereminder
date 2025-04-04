@@ -1,0 +1,243 @@
+/* Custom styling for dropdowns */
+.cyberpunk-select {
+  position: relative;
+  transition: all 0.3s ease;
+  outline: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  text-align-last: center;
+  color-scheme: dark; /* For dark mode compatible dropdowns */
+}
+
+.cyberpunk-select:focus {
+  border-color: #00FFFF !important;
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.3) !important;
+}
+
+.cyberpunk-select:hover {
+  border-color: #FF00FF !important;
+  box-shadow: 0 0 15px rgba(255, 0, 255, 0.3) !important;
+}
+
+/* Remove default styling for select */
+.cyberpunk-select::-ms-expand {
+  display: none;
+}
+
+/* Styling for dropdown options - general */
+.cyberpunk-select option {
+  background-color: rgba(0, 0, 32, 0.95);
+  color: #FFFFFF;
+  padding: 10px;
+  font-size: 1rem;
+  text-align: center;
+}
+
+/* Apply a max-height to the dropdown when opened */
+.cyberpunk-select option:checked {
+  background-color: rgba(0, 255, 255, 0.2);
+  color: #00FFFF;
+}
+
+/* Android-specific styles using media query */
+@media screen and (max-width: 900px) {
+  /* Target mobile devices - including Android */
+  select.cyberpunk-select {
+    background-color: rgba(0, 0, 32, 0.95) !important;
+    color: #FFFFFF !important;
+    border: 1px solid rgba(255, 0, 255, 0.3) !important;
+    padding: 12px 16px;
+    border-radius: 8px;
+  }
+  
+  /* Make sure dropdown options are styled properly on Android */
+  .cyberpunk-select option {
+    background-color: rgba(0, 0, 32, 0.95) !important;
+    color: #FFFFFF !important;
+    font-size: 16px; /* Larger for touch */
+  }
+}
+
+/* Limit dropdown height in Chromium browsers */
+@supports (-webkit-appearance: none) {
+  select.cyberpunk-select {
+    overflow-y: auto;
+    max-height: 300px; /* Limit dropdown height */
+  }
+}
+
+/* Webkit browsers - control the dropdown appearance */
+@media screen and (-webkit-min-device-pixel-ratio:0) {
+  select.cyberpunk-select {
+    background-image: linear-gradient(45deg, transparent 50%, #FF00FF 50%), 
+                     linear-gradient(135deg, #FF00FF 50%, transparent 50%);
+    background-position: calc(100% - 20px) calc(1em + 2px), 
+                         calc(100% - 15px) calc(1em + 2px);
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+  }
+  
+  select.cyberpunk-select:focus {
+    background-image: linear-gradient(45deg, transparent 50%, #00FFFF 50%), 
+                     linear-gradient(135deg, #00FFFF 50%, transparent 50%);
+  }
+  
+  /* Style for the dropdown list */
+  select.cyberpunk-select::-webkit-scrollbar {
+    width: 8px;
+  }
+  
+  select.cyberpunk-select::-webkit-scrollbar-track {
+    background: rgba(0, 0, 32, 0.5);
+  }
+  
+  select.cyberpunk-select::-webkit-scrollbar-thumb {
+    background-color: #FF00FF;
+    border-radius: 4px;
+  }
+  
+  /* This controls the dropdown height */
+  select.cyberpunk-select {
+    overflow-y: auto !important;
+    max-height: 300px !important;
+  }
+}
+
+/* Firefox specific styling */
+@-moz-document url-prefix() {
+  .cyberpunk-select {
+    text-indent: 0.01px;
+    text-overflow: '';
+    padding-right: 1em;
+  }
+  
+  /* Firefox dropdown size control */
+  .cyberpunk-select option {
+    max-height: 300px;
+  }
+  
+  .cyberpunk-select optgroup {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+}
+
+/* Override native styling for the dropdown height */
+select.cyberpunk-select {
+  height: auto;
+}
+
+/* This adds a pseudo element for the cyberpunk glow effect */
+.cyberpunk-select::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, #FF00FF, #00FFFF);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.cyberpunk-select:focus::after,
+.cyberpunk-select:hover::after {
+  opacity: 1;
+}
+
+/* For Android/Mobile native dropdown styling */
+@supports (-webkit-touch-callout: none) {
+  /* iOS & Android devices */
+  select.cyberpunk-select {
+    font-size: 16px; /* Better for touch */
+    padding: 12px 16px;
+  }
+}
+
+/* For popover style dropdowns in Android WebView */
+select.cyberpunk-select:focus option {
+  background-color: rgba(0, 0, 32, 0.95);
+  color: #FFFFFF;
+  box-shadow: 0 0 10px rgba(255, 0, 255, 0.5);
+}
+
+/* Custom dropdown styling */
+.custom-dropdown-menu {
+  scrollbar-width: thin;
+  scrollbar-color: #FF00FF rgba(0, 0, 32, 0.5);
+  position: fixed !important; /* Fix positioning issues */
+  max-height: 250px !important;
+  z-index: 10000 !important; /* Ensure it appears above everything */
+}
+
+.custom-dropdown-menu::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-dropdown-menu::-webkit-scrollbar-track {
+  background: rgba(0, 0, 32, 0.5);
+  border-radius: 4px;
+}
+
+.custom-dropdown-menu::-webkit-scrollbar-thumb {
+  background-color: #FF00FF;
+  border-radius: 4px;
+}
+
+/* Styling for the custom dropdown option hover */
+.custom-dropdown-option {
+  transition: all 0.2s ease;
+}
+
+.custom-dropdown-option:hover, 
+.custom-dropdown-option:active {
+  background-color: rgba(255, 0, 255, 0.2) !important;
+}
+
+/* Android-specific styles */
+@media screen and (max-width: 800px) {
+  .custom-dropdown-menu {
+    /* Android optimization for smoother scrolling */
+    -webkit-overflow-scrolling: touch;
+    max-height: 250px !important;
+  }
+  
+  .custom-dropdown-option {
+    padding: 12px 16px !important;
+    font-size: 16px !important;
+  }
+}
+
+/* Apply teal glow when the dropdown is open */
+.dropdown-toggle-open {
+  border-color: #00FFFF !important;
+  box-shadow: 0 0 15px rgba(0, 255, 255, 0.3) !important;
+}
+
+/* Apply magenta glow when hovering */
+.dropdown-toggle:hover {
+  border-color: #FF00FF !important;
+  box-shadow: 0 0 15px rgba(255, 0, 255, 0.3) !important;
+}
+
+/* Handle positioning and scrolling */
+.custom-dropdown-menu.position-top {
+  bottom: calc(100% + 4px);
+  top: auto !important;
+}
+
+.custom-dropdown-menu.position-bottom {
+  top: calc(100% + 4px);
+  bottom: auto !important;
+}
+
+/* Make sure the dropdown wrapper has proper positioning */
+.dropdown-wrapper {
+  position: relative;
+}
+
+/* For fixed positioning contexts inside scrollable areas */
+body:has(.custom-dropdown-menu) {
+  overflow: hidden;
+} 

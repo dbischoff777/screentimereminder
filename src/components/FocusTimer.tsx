@@ -1,0 +1,401 @@
+import { useState, useEffect, useRef } from 'react';
+import { Paper, Text, Progress, Stack, Group, ActionIcon, Badge, Title } from '@mantine/core';
+import { FiPlay, FiPause, FiSkipForward, FiRotateCcw, FiChevronDown } from 'react-icons/fi';
+import '../styles/FocusTimer.css'; // Add this import for custom dropdown styling
+import '../styles/Mobile.css'; // Mobile-specific styling for Android
+
+interface FocusTimerProps {
+  onSessionComplete: (category: string, duration: number) => void;
+}
+
+const categories = [
+  { value: 'Productivity', label: 'Productivity', color: '#33FF57' },
+  { value: 'Education', label: 'Education', color: '#3357FF' },
+  { value: 'Creative', label: 'Creative', color: '#FF00FF' },
+  { value: 'Reading', label: 'Reading', color: '#00FFFF' },
+  { value: 'Meditation', label: 'Meditation', color: '#FF5733' },
+];
+
+const durations = Array.from({ length: 24 }, (_, i) => {
+  const minutes = (i + 1) * 5;
+  return { value: minutes.toString(), label: `${minutes} min` };
+});
+
+// Custom dropdown component
+const CustomDropdown = ({ 
+  options, 
+  value, 
+  onChange, 
+  label 
+}: { 
+  options: { value: string, label: string, color?: string }[], 
+  value: string, 
+  onChange: (val: string) => void,
+  label: string
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLDivElement>(null);
+  const [positionTop, setPositionTop] = useState(true);
+  
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+  
+  // Calculate dropdown position and dimensions
+  useEffect(() => {
+    if (isOpen && toggleRef.current) {
+      const rect = toggleRef.current.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
+      const dropdownHeight = 200; // Approximate max height
+      
+      // If there's not enough space below, position above
+      if (rect.bottom + dropdownHeight > viewportHeight) {
+        setPositionTop(false);
+      } else {
+        setPositionTop(true);
+      }
+      
+      // Find and position dropdown
+      const dropdown = document.querySelector('.custom-dropdown-menu') as HTMLElement;
+      if (dropdown) {
+        dropdown.style.width = `${rect.width}px`;
+        dropdown.style.left = `${rect.left}px`;
+        
+        if (positionTop) {
+          dropdown.style.top = `${rect.bottom}px`;
+        } else {
+          dropdown.style.bottom = `${viewportHeight - rect.top}px`;
+        }
+      }
+    }
+  }, [isOpen, positionTop]);
+
+  const selectedOption = options.find(opt => opt.value === value);
+
+  return (
+    <div className="dropdown-wrapper" style={{ marginBottom: '1rem' }} ref={dropdownRef}>
+      <Text style={{ 
+        color: '#AAAAAA', 
+        marginBottom: '0.5rem', 
+        fontSize: '0.9rem',
+        textAlign: 'left'
+      }}>
+        {label}
+      </Text>
+      
+      <div 
+        ref={toggleRef}
+        onClick={() => setIsOpen(!isOpen)}
+        className={`dropdown-toggle ${isOpen ? 'dropdown-toggle-open' : ''}`}
+        style={{
+          backgroundColor: 'rgba(0, 0, 32, 0.5)',
+          color: '#FFFFFF',
+          border: '1px solid rgba(255, 255, 255, 0.1)',
+          fontSize: '1.2rem',
+          textAlign: 'center',
+          cursor: 'pointer',
+          padding: '8px 16px',
+          borderRadius: '4px',
+          width: '100%',
+          boxShadow: '0 0 10px rgba(0, 255, 255, 0.1)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          transition: 'all 0.3s ease'
+        }}
+      >
+        <span>{selectedOption?.label}</span>
+        <FiChevronDown 
+          size={16} 
+          color={isOpen ? '#00FFFF' : '#AAAAAA'} 
+          style={{ 
+            transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 0.3s ease'
+          }} 
+        />
+      </div>
+      
+      {isOpen && (
+        <div 
+          className={`custom-dropdown-menu ${positionTop ? 'position-bottom' : 'position-top'}`}
+          style={{
+            position: 'fixed',
+            backgroundColor: 'rgba(0, 0, 32, 0.95)',
+            border: '1px solid rgba(255, 0, 255, 0.3)',
+            borderRadius: '4px',
+            zIndex: 1000,
+            maxHeight: '200px',
+            overflowY: 'auto',
+            boxShadow: '0 8px 16px rgba(0, 0, 0, 0.6)',
+            backdropFilter: 'blur(10px)'
+          }}
+        >
+          {options.map(option => (
+            <div
+              key={option.value}
+              className="custom-dropdown-option"
+              onClick={() => {
+                onChange(option.value);
+                setIsOpen(false);
+              }}
+              style={{
+                padding: '10px 16px',
+                cursor: 'pointer',
+                backgroundColor: option.value === value ? 'rgba(0, 255, 255, 0.2)' : 'transparent',
+                color: option.value === value ? '#00FFFF' : '#FFFFFF',
+                borderLeft: option.value === value ? '3px solid #00FFFF' : 'none',
+                textAlign: 'center',
+                fontWeight: option.value === value ? 'bold' : 'normal'
+              }}
+            >
+              {option.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const FocusTimer: React.FC<FocusTimerProps> = ({ onSessionComplete }) => {
+  const [timeLeft, setTimeLeft] = useState(25 * 60); // 25 minutes in seconds
+  const [isRunning, setIsRunning] = useState(false);
+  const [selectedDuration, setSelectedDuration] = useState('25');
+  const [selectedCategory, setSelectedCategory] = useState('Productivity');
+  const [showCompleteMessage, setShowCompleteMessage] = useState(false);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+
+    if (isRunning && timeLeft > 0) {
+      timer = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            setIsRunning(false);
+            setShowCompleteMessage(true);
+            onSessionComplete(selectedCategory, parseInt(selectedDuration));
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [isRunning, timeLeft, selectedCategory, selectedDuration, onSessionComplete]);
+
+  const handleDurationChange = (value: string | null) => {
+    if (!value) return;
+    setSelectedDuration(value);
+    setTimeLeft(parseInt(value) * 60);
+    setIsRunning(false);
+    setShowCompleteMessage(false);
+  };
+
+  const handleCategoryChange = (value: string | null) => {
+    if (!value) return;
+    setSelectedCategory(value);
+    setShowCompleteMessage(false);
+  };
+
+  const toggleTimer = () => {
+    setIsRunning(!isRunning);
+    setShowCompleteMessage(false);
+  };
+
+  const resetTimer = () => {
+    setTimeLeft(parseInt(selectedDuration) * 60);
+    setIsRunning(false);
+    setShowCompleteMessage(false);
+  };
+
+  const skipTimer = () => {
+    setTimeLeft(0);
+    setIsRunning(false);
+    setShowCompleteMessage(true);
+    onSessionComplete(selectedCategory, parseInt(selectedDuration));
+  };
+
+  const formatTime = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+  };
+
+  const getProgress = () => {
+    const totalSeconds = parseInt(selectedDuration) * 60;
+    return ((totalSeconds - timeLeft) / totalSeconds) * 100;
+  };
+
+  return (
+    <Paper
+      style={{
+        background: 'rgba(0, 0, 32, 0.3)',
+        padding: '2rem',
+        paddingBottom: '3rem',
+        borderRadius: '12px',
+        border: '1px solid rgba(255, 0, 255, 0.1)',
+        marginBottom: '1rem',
+        position: 'relative',
+        zIndex: 10,
+      }}
+    >
+      <Title
+        order={2}
+        style={{
+          fontSize: '1.5rem',
+          marginBottom: '1.5rem',
+          color: '#00FFFF',
+          textAlign: 'center',
+          textShadow: '0 0 10px rgba(0, 255, 255, 0.5)'
+        }}
+      >
+        Focus Timer
+      </Title>
+
+      <Stack gap="xl">
+        {/* Timer Display and Duration Picker */}
+        <div style={{ textAlign: 'center' }}>
+          {!isRunning && (
+            <CustomDropdown
+              options={durations}
+              value={selectedDuration}
+              onChange={handleDurationChange}
+              label="Duration"
+            />
+          )}
+
+          <Text 
+            size="4rem" 
+            style={{ 
+              color: '#FFFFFF',
+              fontWeight: 700,
+              fontFamily: 'monospace',
+              textShadow: '0 0 20px rgba(255, 255, 255, 0.5)',
+              marginBottom: '1rem'
+            }}
+          >
+            {formatTime(timeLeft)}
+          </Text>
+
+          {showCompleteMessage && (
+            <Badge 
+              size="lg"
+              style={{
+                backgroundColor: categories.find(c => c.value === selectedCategory)?.color,
+                color: '#000000',
+                marginBottom: '1rem'
+              }}
+            >
+              Session Complete!
+            </Badge>
+          )}
+        </div>
+
+        {/* Progress Bar */}
+        <Progress
+          value={getProgress()}
+          size="lg"
+          radius="xl"
+          styles={() => ({
+            root: { 
+              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+              height: '12px' 
+            },
+            section: { 
+              backgroundColor: categories.find(c => c.value === selectedCategory)?.color || '#FFFFFF',
+              transition: 'width 1s linear',
+              boxShadow: '0 0 10px rgba(255, 255, 255, 0.5)'
+            }
+          })}
+        />
+
+        {/* Controls */}
+        <Group justify="center" gap="md">
+          <ActionIcon
+            variant="filled"
+            size="lg"
+            radius="xl"
+            onClick={toggleTimer}
+            c={isRunning ? 'red' : 'green'}
+            bg={isRunning ? 'rgba(255, 0, 0, 0.2)' : 'rgba(0, 255, 0, 0.2)'}
+            styles={{
+              root: {
+                border: `1px solid ${isRunning ? '#FF0000' : '#00FF00'}`,
+                '&:hover': {
+                  transform: 'scale(1.1)',
+                  backgroundColor: isRunning ? 'rgba(255, 0, 0, 0.3)' : 'rgba(0, 255, 0, 0.3)',
+                }
+              }
+            }}
+          >
+            {isRunning ? <FiPause size={20} /> : <FiPlay size={20} />}
+          </ActionIcon>
+
+          <ActionIcon
+            variant="filled"
+            size="lg"
+            radius="xl"
+            onClick={resetTimer}
+            c="white"
+            bg="rgba(255, 255, 255, 0.1)"
+            styles={{
+              root: {
+                border: '1px solid #FFFFFF',
+                '&:hover': {
+                  transform: 'scale(1.1)',
+                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                }
+              }
+            }}
+          >
+            <FiRotateCcw size={20} />
+          </ActionIcon>
+
+          <ActionIcon
+            variant="filled"
+            size="lg"
+            radius="xl"
+            onClick={skipTimer}
+            c="cyan"
+            bg="rgba(0, 255, 255, 0.1)"
+            styles={{
+              root: {
+                border: '1px solid #00FFFF',
+                '&:hover': {
+                  transform: 'scale(1.1)',
+                  backgroundColor: 'rgba(0, 255, 255, 0.2)',
+                }
+              }
+            }}
+          >
+            <FiSkipForward size={20} />
+          </ActionIcon>
+        </Group>
+
+        {/* Category Selection */}
+        <CustomDropdown
+          options={categories}
+          value={selectedCategory}
+          onChange={handleCategoryChange}
+          label="Focus Category"
+        />
+      </Stack>
+    </Paper>
+  );
+};
+
+export default FocusTimer; 

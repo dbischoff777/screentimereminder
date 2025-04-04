@@ -1,0 +1,79 @@
+/* Mobile.css - Android-specific styles */
+
+/* Target Android devices */
+@media screen and (max-width: 800px) {
+  /* Custom dropdown mobile styling */
+  .custom-dropdown-menu {
+    max-height: 250px !important; 
+    -webkit-overflow-scrolling: touch;
+    border: 2px solid rgba(255, 0, 255, 0.5) !important;
+    box-shadow: 0 0 20px rgba(255, 0, 255, 0.3) !important;
+    position: fixed !important; /* Force fixed position on mobile */
+    width: calc(100% - 4rem) !important; /* Match container width */
+  }
+  
+  .custom-dropdown-option {
+    padding: 14px 16px !important;
+    font-size: 16px !important;
+    min-height: 48px !important; /* Better touch targets */
+  }
+  
+  /* Make selected option more visible */
+  .custom-dropdown-option[style*="rgba(0, 255, 255, 0.2)"] {
+    background-color: rgba(0, 255, 255, 0.3) !important;
+    border-left: 3px solid #00FFFF !important;
+  }
+  
+  /* Add active state for touch feedback */
+  .custom-dropdown-option:active {
+    background-color: rgba(255, 0, 255, 0.4) !important;
+    color: white !important;
+  }
+  
+  /* Make dropdown toggle easier to tap */
+  .dropdown-toggle {
+    padding: 12px 16px !important;
+    border-radius: 8px !important;
+    min-height: 48px !important;
+  }
+
+  /* Ensure text is visible and centered */
+  .dropdown-toggle span {
+    font-size: 16px !important;
+    font-weight: 500 !important;
+  }
+  
+  /* Ensure parent container can position fixed children */
+  .dropdown-wrapper {
+    position: static !important;
+  }
+  
+  /* Prevent content from being cut off at the bottom */
+  .mantine-Stack-root {
+    padding-bottom: 60px !important;
+  }
+  
+  /* Make sure dropdown doesn't exceed screen size */
+  .custom-dropdown-menu.position-bottom {
+    bottom: auto !important;
+    max-height: 40vh !important;
+  }
+  
+  .custom-dropdown-menu.position-top {
+    top: auto !important;
+    max-height: 40vh !important;
+  }
+}
+
+/* WebView specific styles */
+@media screen and (-webkit-min-device-pixel-ratio: 0) {
+  select.cyberpunk-select {
+    -webkit-appearance: none !important;
+    background-image: linear-gradient(45deg, transparent 50%, #FF00FF 50%), 
+                     linear-gradient(135deg, #FF00FF 50%, transparent 50%) !important;
+    background-position: calc(100% - 20px) calc(1em + 2px), 
+                         calc(100% - 15px) calc(1em + 2px) !important;
+    background-size: 5px 5px, 5px 5px !important;
+    background-repeat: no-repeat !important;
+  }
+} 

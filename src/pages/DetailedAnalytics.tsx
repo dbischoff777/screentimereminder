@@ -1,6 +1,7 @@
-import { Container, Title, Text, Grid, Tabs, Paper, Card, Badge } from '@mantine/core';
+import { Container, Title, Text, Grid, Tabs, Paper, Card, Badge, Stack, Group } from '@mantine/core';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect } from 'react';
+import FocusTimer from '../components/FocusTimer';
 
 const DetailedAnalytics = () => {
   const { 
@@ -10,6 +11,13 @@ const DetailedAnalytics = () => {
   } = useScreenTime();
   const [totalScreenTime, setTotalScreenTime] = useState(0);
   const [activeTab, setActiveTab] = useState<string | null>('heatmap');
+
+  // Add focus session tracking
+  const [focusSessions, setFocusSessions] = useState<{
+    category: string;
+    duration: number;
+    timestamp: Date;
+  }[]>([]);
 
   useEffect(() => {
     // Calculate total screen time
@@ -195,6 +203,28 @@ const DetailedAnalytics = () => {
 
   const categoryDistribution = calculateCategoryDistribution();
 
+  // Handle completed focus sessions
+  const handleFocusSessionComplete = (category: string, duration: number) => {
+    setFocusSessions(prev => [
+      ...prev,
+      {
+        category,
+        duration,
+        timestamp: new Date()
+      }
+    ]);
+  };
+
+  // Calculate total focus time for today
+  const getTodayFocusTime = () => {
+    const today = new Date();
+    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    
+    return focusSessions
+      .filter(session => new Date(session.timestamp) >= startOfDay)
+      .reduce((total, session) => total + session.duration, 0);
+  };
+
   return (
     <Container 
       size="md" 
@@ -222,7 +252,8 @@ const DetailedAnalytics = () => {
 
       <Tabs
         value={activeTab}
-        onChange={(value) => setActiveTab(value === activeTab ? null : value as string)}
+        onChange={setActiveTab}
+        defaultValue="heatmap"
         style={{ marginBottom: '2rem' }}
         styles={{
           root: {
@@ -237,16 +268,26 @@ const DetailedAnalytics = () => {
             gap: '2px',
             backgroundColor: 'rgba(0, 0, 32, 0.3)',
             padding: '2px',
-            borderRadius: '8px'
+            borderRadius: '8px',
+            overflowX: 'auto',
+            overflowY: 'hidden',
+            scrollbarWidth: 'none', // Firefox
+            msOverflowStyle: 'none', // IE/Edge
+            '&::-webkit-scrollbar': {
+              display: 'none' // Chrome/Safari/Opera
+            },
+            WebkitOverflowScrolling: 'touch', // Smooth scrolling on iOS
           },
           tab: {
-            flex: '1',
+            flex: '0 0 auto',
+            minWidth: '120px',
             color: '#00FFFF',
             fontSize: '0.9rem',
-            padding: '0.75rem 0.5rem',
+            padding: '0.75rem 1rem',
             textAlign: 'center',
             backgroundColor: 'rgba(0, 0, 32, 0.5)',
             transition: 'all 0.3s ease',
+            whiteSpace: 'nowrap',
             '&:first-of-type': {
               borderTopLeftRadius: '6px',
               borderBottomLeftRadius: '6px',
@@ -276,6 +317,7 @@ const DetailedAnalytics = () => {
           <Tabs.Tab value="timeline">TIMELINE</Tabs.Tab>
           <Tabs.Tab value="insights">INSIGHTS</Tabs.Tab>
           <Tabs.Tab value="details">DETAILS</Tabs.Tab>
+          <Tabs.Tab value="focus">FOCUS</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="heatmap">
@@ -961,6 +1003,64 @@ const DetailedAnalytics = () => {
               ))
             )}
           </Grid>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="focus">
+          <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+            <FocusTimer onSessionComplete={handleFocusSessionComplete} />
+
+            {/* Focus Sessions Summary */}
+            {focusSessions.length > 0 && (
+              <Paper
+                style={{
+                  background: 'rgba(0, 0, 32, 0.3)',
+                  padding: '1.5rem',
+                  borderRadius: '8px',
+                  marginTop: '2rem',
+                  border: '1px solid rgba(255, 0, 255, 0.1)',
+                }}
+              >
+                <Text size="xl" fw={700} style={{ color: '#00FFFF', marginBottom: '1rem' }}>
+                  Today's Focus Sessions
+                </Text>
+                
+                <Text style={{ color: '#FFFFFF', marginBottom: '1rem' }}>
+                  Total Focus Time: {formatDetailedTime(getTodayFocusTime())}
+                </Text>
+
+                <Stack gap="md">
+                  {focusSessions
+                    .filter(session => {
+                      const sessionDate = new Date(session.timestamp);
+                      const today = new Date();
+                      return (
+                        sessionDate.getDate() === today.getDate() &&
+                        sessionDate.getMonth() === today.getMonth() &&
+                        sessionDate.getFullYear() === today.getFullYear()
+                      );
+                    })
+                    .map((session, index) => (
+                      <Group key={index} justify="space-between" style={{ 
+                        padding: '0.5rem',
+                        borderRadius: '4px',
+                        backgroundColor: 'rgba(255, 255, 255, 0.05)'
+                      }}>
+                        <div>
+                          <Text style={{ color: '#FFFFFF' }}>
+                            {session.category}
+                          </Text>
+                          <Text size="sm" style={{ color: '#AAAAAA' }}>
+                            {new Date(session.timestamp).toLocaleTimeString()}
+                          </Text>
+                        </div>
+                        <Badge>{session.duration} minutes</Badge>
+                      </Group>
+                    ))
+                    .reverse()}
+                </Stack>
+              </Paper>
+            )}
+          </div>
         </Tabs.Panel>
       </Tabs>
 
