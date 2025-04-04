@@ -1,4 +1,4 @@
-import { Container, Title, Text, Grid, Tabs, Paper, Card } from '@mantine/core';
+import { Container, Title, Text, Grid, Tabs, Paper, Card, Badge } from '@mantine/core';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect } from 'react';
 
@@ -117,6 +117,83 @@ const DetailedAnalytics = () => {
 
     return color;
   };
+
+  // Category colors for visualization
+  const categoryColors = {
+    'Social Media': '#FF00FF',
+    'Entertainment': '#FF5733',
+    'Productivity': '#33FF57',
+    'Games': '#00FFFF',
+    'Education': '#3357FF',
+    'Other': '#A833FF'
+  };
+
+  // Calculate productivity score based on app categories
+  const calculateProductivityScore = () => {
+    if (sortedTimelineData.length === 0) return 0;
+
+    const categoryScores = {
+      'Productivity': 1,
+      'Education': 1,
+      'Communication': 0.5,
+      'Social Media': -0.5,
+      'Entertainment': -0.5,
+      'Games': -1,
+      'Other': 0
+    };
+
+    let totalScore = 0;
+    let totalTime = 0;
+
+    sortedTimelineData.forEach(app => {
+      const score = categoryScores[app.category as keyof typeof categoryScores] || 0;
+      totalScore += score * app.time;
+      totalTime += app.time;
+    });
+
+    return totalTime > 0 ? Math.round((totalScore / totalTime) * 100) : 0;
+  };
+
+  const productivityScore = calculateProductivityScore();
+
+  // Get color based on productivity score
+  const getProductivityColor = (score: number) => {
+    if (score >= 75) return '#00FF00';      // High productivity (green)
+    if (score >= 25) return '#00FFFF';      // Moderate productivity (cyan)
+    if (score >= -25) return '#FFFFFF';     // Neutral (white)
+    if (score >= -75) return '#FF00FF';     // Low productivity (magenta)
+    return '#FF0000';                       // Very low productivity (red)
+  };
+
+  // Get label based on productivity score
+  const getProductivityLabel = (score: number) => {
+    if (score >= 75) return 'Highly Productive';
+    if (score >= 25) return 'Productive';
+    if (score >= -25) return 'Neutral';
+    if (score >= -75) return 'Distracting';
+    return 'Highly Distracting';
+  };
+
+  // Calculate category distribution using native categories
+  const calculateCategoryDistribution = () => {
+    const distribution = new Map();
+    let totalTime = 0;
+
+    sortedTimelineData.forEach(app => {
+      const category = app.category || 'Other';
+      const current = distribution.get(category) || 0;
+      distribution.set(category, current + app.time);
+      totalTime += app.time;
+    });
+
+    return Array.from(distribution.entries()).map(([category, time]) => ({
+      category,
+      time,
+      percentage: totalTime > 0 ? Math.round((time / totalTime) * 100) : 0
+    }));
+  };
+
+  const categoryDistribution = calculateCategoryDistribution();
 
   return (
     <Container 
@@ -569,6 +646,82 @@ const DetailedAnalytics = () => {
             </Title>
 
             <Grid>
+              {/* Productivity Score */}
+              <Grid.Col span={12}>
+                <Paper
+                  style={{
+                    background: 'rgba(0, 0, 32, 0.3)',
+                    padding: '1.5rem',
+                    borderRadius: '8px',
+                    marginBottom: '1.5rem'
+                  }}
+                >
+                  <div style={{ textAlign: 'center' }}>
+                    <Text size="xl" fw={700} style={{ color: '#00FFFF', marginBottom: '1rem' }}>
+                      Productivity Score
+                    </Text>
+                    <div style={{ 
+                      display: 'flex', 
+                      justifyContent: 'center', 
+                      alignItems: 'center',
+                      gap: '1rem',
+                      marginBottom: '1rem'
+                    }}>
+                      <Text size="3rem" style={{ 
+                        color: getProductivityColor(productivityScore),
+                        fontWeight: 700,
+                        textShadow: `0 0 10px ${getProductivityColor(productivityScore)}`
+                      }}>
+                        {productivityScore}
+                      </Text>
+                      <Badge 
+                        size="lg"
+                        style={{ 
+                          backgroundColor: getProductivityColor(productivityScore),
+                          color: '#000000'
+                        }}
+                      >
+                        {getProductivityLabel(productivityScore)}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  {/* Category Distribution */}
+                  <div style={{ marginTop: '2rem' }}>
+                    <Text fw={500} style={{ color: '#FFFFFF', marginBottom: '1rem' }}>
+                      Category Distribution
+                    </Text>
+                    {categoryDistribution.map(({ category, time, percentage }) => (
+                      <div key={category} style={{ marginBottom: '1rem' }}>
+                        <div style={{ 
+                          display: 'flex', 
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: '0.5rem'
+                        }}>
+                          <Text size="sm" style={{ color: '#FFFFFF' }}>{category}</Text>
+                          <Text size="sm" style={{ color: '#AAAAAA' }}>{formatDetailedTime(time)} ({percentage}%)</Text>
+                        </div>
+                        <div style={{ 
+                          width: '100%',
+                          height: '4px',
+                          backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                          borderRadius: '2px',
+                          overflow: 'hidden'
+                        }}>
+                          <div style={{
+                            width: `${percentage}%`,
+                            height: '100%',
+                            backgroundColor: categoryColors[category as keyof typeof categoryColors] || '#FFFFFF',
+                            transition: 'width 0.3s ease'
+                          }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Paper>
+              </Grid.Col>
+
               {/* Most Used App */}
               <Grid.Col span={6}>
                 <Paper
@@ -775,9 +928,20 @@ const DetailedAnalytics = () => {
                         </div>
                       )}
                       <div>
-                        <Text style={{ color: '#FFFFFF', fontSize: '1.1rem', fontWeight: 500 }}>
-                          {app.name}
-                        </Text>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                          <Text style={{ color: '#FFFFFF', fontSize: '1.1rem', fontWeight: 500 }}>
+                            {app.name}
+                          </Text>
+                          <Badge
+                            size="sm"
+                            style={{
+                              backgroundColor: categoryColors[app.category as keyof typeof categoryColors] || '#FFFFFF',
+                              color: '#000000'
+                            }}
+                          >
+                            {app.category}
+                          </Badge>
+                        </div>
                         <Text size="sm" style={{ color: '#AAAAAA' }}>
                           Last used: {formatTimelineTime(app.lastUsed)}
                         </Text>
