@@ -225,6 +225,39 @@ const DetailedAnalytics = () => {
       .reduce((total, session) => total + session.duration, 0);
   };
 
+  // Function to ensure popover elements are positioned within the viewport
+  const ensureInViewport = (element: HTMLElement | null) => {
+    if (!element) return;
+    
+    const rect = element.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    
+    // If element extends beyond bottom of screen
+    if (rect.bottom > viewportHeight) {
+      const overflowAmount = rect.bottom - viewportHeight;
+      const newTop = Math.max(0, rect.top - overflowAmount - 20); // 20px buffer
+      element.style.top = `${newTop}px`;
+    }
+  };
+
+  // Add event listener to fix popover positioning
+  useEffect(() => {
+    const checkPopovers = () => {
+      const popovers = document.querySelectorAll('.mantine-Select-dropdown, .mantine-Popover-dropdown');
+      popovers.forEach(popover => ensureInViewport(popover as HTMLElement));
+    };
+    
+    window.addEventListener('scroll', checkPopovers);
+    
+    // Check for popovers every 500ms
+    const interval = setInterval(checkPopovers, 500);
+    
+    return () => {
+      window.removeEventListener('scroll', checkPopovers);
+      clearInterval(interval);
+    };
+  }, []);
+
   return (
     <Container 
       size="md" 
@@ -233,8 +266,10 @@ const DetailedAnalytics = () => {
         background: '#000020',
         minHeight: '100vh',
         padding: '1rem',
+        paddingBottom: '3rem',
         position: 'relative',
-        overflowX: 'hidden'
+        overflowX: 'hidden',
+        overflowY: 'visible'
       }}
     >
       <Title
@@ -309,7 +344,13 @@ const DetailedAnalytics = () => {
             color: '#00FFFF',
             padding: '1rem 0',
             animation: 'fadeIn 0.3s ease',
+            overflowY: 'visible', // Ensure dropdowns are not cut off
+            position: 'relative', // Enable proper positioning
+            zIndex: 1 // Ensure proper stacking
           },
+        }}
+        classNames={{
+          panel: 'detailed-analytics-panel'
         }}
       >
         <Tabs.List>
@@ -320,7 +361,7 @@ const DetailedAnalytics = () => {
           <Tabs.Tab value="focus">FOCUS</Tabs.Tab>
         </Tabs.List>
 
-        <Tabs.Panel value="heatmap">
+        <Tabs.Panel value="heatmap" data-active-tab="heatmap">
           <div style={{ 
             maxWidth: '100%',
             margin: '0 auto',
@@ -535,7 +576,7 @@ const DetailedAnalytics = () => {
           </div>
         </Tabs.Panel>
 
-        <Tabs.Panel value="timeline">
+        <Tabs.Panel value="timeline" data-active-tab="timeline">
           <Title
             order={2}
             style={{
@@ -667,7 +708,7 @@ const DetailedAnalytics = () => {
           </div>
         </Tabs.Panel>
 
-        <Tabs.Panel value="insights">
+        <Tabs.Panel value="insights" data-active-tab="insights">
           {/* Usage Insights Dashboard */}
           <div style={{
             padding: '1.5rem',
@@ -904,7 +945,7 @@ const DetailedAnalytics = () => {
           </div>
         </Tabs.Panel>
 
-        <Tabs.Panel value="details">
+        <Tabs.Panel value="details" data-active-tab="details">
           <Title
             order={2}
             style={{
@@ -1005,8 +1046,8 @@ const DetailedAnalytics = () => {
           </Grid>
         </Tabs.Panel>
 
-        <Tabs.Panel value="focus">
-          <div style={{ maxWidth: '600px', margin: '0 auto' }}>
+        <Tabs.Panel value="focus" data-active-tab="focus">
+          <div style={{ maxWidth: '600px', margin: '0 auto', paddingBottom: '80px' }}>
             <FocusTimer onSessionComplete={handleFocusSessionComplete} />
 
             {/* Focus Sessions Summary */}
@@ -1075,6 +1116,27 @@ const DetailedAnalytics = () => {
               opacity: 1;
               transform: translateY(0);
             }
+          }
+
+          /* Fix for dropdown menus */
+          .mantine-Select-dropdown {
+            z-index: 10000;
+            position: fixed;
+            max-height: 60vh;
+          }
+
+          /* Custom scrollbar for dropdowns */
+          .mantine-Select-dropdown::-webkit-scrollbar {
+            width: 8px;
+          }
+          
+          .mantine-Select-dropdown::-webkit-scrollbar-track {
+            background: rgba(0, 0, 32, 0.5);
+          }
+          
+          .mantine-Select-dropdown::-webkit-scrollbar-thumb {
+            background-color: #FF00FF;
+            border-radius: 4px;
           }
         `}
       </style>

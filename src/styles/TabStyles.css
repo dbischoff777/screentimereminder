@@ -1,0 +1,42 @@
+/* Tab styling for all tabs components */
+
+/* Ensure tab panels don't clip dropdown content */
+.mantine-Tabs-panel {
+  overflow: visible !important;
+  position: relative;
+}
+
+/* Allow horizontal scrolling of tabs */
+.mantine-Tabs-list {
+  overflow-x: auto !important;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+.mantine-Tabs-list::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
+}
+
+/* Make sure tab content has proper spacing at bottom */
+.mantine-Tabs-panel {
+  padding-bottom: 30px;
+}
+
+/* Ensure the container for tabs doesn't clip content */
+.mantine-Tabs-root {
+  overflow: visible !important;
+}
+
+/* Style adjustments for dropdown elements within tabs */
+.mantine-Tabs-panel .mantine-Select-dropdown,
+.mantine-Tabs-panel .mantine-Popover-dropdown {
+  z-index: 1000;
+  position: fixed;
+}
+
+/* For mobile devices */
+@media screen and (max-width: 800px) {
+  .mantine-Tabs-panel {
+    padding-bottom: 50px;
+  }
+} 

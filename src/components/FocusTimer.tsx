@@ -37,7 +37,9 @@ const CustomDropdown = ({
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const toggleRef = useRef<HTMLDivElement>(null);
-  const [positionTop, setPositionTop] = useState(true);
+  
+  // Force category dropdown to open upward
+  const openUpward = label === "Focus Category";
   
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -57,15 +59,6 @@ const CustomDropdown = ({
   useEffect(() => {
     if (isOpen && toggleRef.current) {
       const rect = toggleRef.current.getBoundingClientRect();
-      const viewportHeight = window.innerHeight;
-      const dropdownHeight = 200; // Approximate max height
-      
-      // If there's not enough space below, position above
-      if (rect.bottom + dropdownHeight > viewportHeight) {
-        setPositionTop(false);
-      } else {
-        setPositionTop(true);
-      }
       
       // Find and position dropdown
       const dropdown = document.querySelector('.custom-dropdown-menu') as HTMLElement;
@@ -73,19 +66,25 @@ const CustomDropdown = ({
         dropdown.style.width = `${rect.width}px`;
         dropdown.style.left = `${rect.left}px`;
         
-        if (positionTop) {
-          dropdown.style.top = `${rect.bottom}px`;
+        if (openUpward) {
+          // Position above the toggle button for category
+          dropdown.style.bottom = `${window.innerHeight - rect.top}px`;
+          dropdown.style.top = 'auto';
         } else {
-          dropdown.style.bottom = `${viewportHeight - rect.top}px`;
+          // Position below for duration
+          dropdown.style.top = `${rect.bottom}px`;
+          dropdown.style.bottom = 'auto';
         }
       }
     }
-  }, [isOpen, positionTop]);
+  }, [isOpen, openUpward]);
 
   const selectedOption = options.find(opt => opt.value === value);
+  
+  const dropdownClass = openUpward ? "focus-category-dropdown" : "";
 
   return (
-    <div className="dropdown-wrapper" style={{ marginBottom: '1rem' }} ref={dropdownRef}>
+    <div className={`dropdown-wrapper ${dropdownClass}`} style={{ marginBottom: '1rem' }} ref={dropdownRef}>
       <Text style={{ 
         color: '#AAAAAA', 
         marginBottom: '0.5rem', 
@@ -129,7 +128,7 @@ const CustomDropdown = ({
       
       {isOpen && (
         <div 
-          className={`custom-dropdown-menu ${positionTop ? 'position-bottom' : 'position-top'}`}
+          className={`custom-dropdown-menu ${openUpward ? 'position-top' : 'position-bottom'}`}
           style={{
             position: 'fixed',
             backgroundColor: 'rgba(0, 0, 32, 0.95)',
@@ -138,7 +137,7 @@ const CustomDropdown = ({
             zIndex: 1000,
             maxHeight: '200px',
             overflowY: 'auto',
-            boxShadow: '0 8px 16px rgba(0, 0, 0, 0.6)',
+            boxShadow: openUpward ? '0 -8px 16px rgba(0, 0, 0, 0.6)' : '0 8px 16px rgba(0, 0, 0, 0.6)',
             backdropFilter: 'blur(10px)'
           }}
         >
@@ -175,6 +174,7 @@ const FocusTimer: React.FC<FocusTimerProps> = ({ onSessionComplete }) => {
   const [selectedDuration, setSelectedDuration] = useState('25');
   const [selectedCategory, setSelectedCategory] = useState('Productivity');
   const [showCompleteMessage, setShowCompleteMessage] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -243,6 +243,7 @@ const FocusTimer: React.FC<FocusTimerProps> = ({ onSessionComplete }) => {
 
   return (
     <Paper
+      ref={containerRef}
       style={{
         background: 'rgba(0, 0, 32, 0.3)',
         padding: '2rem',
@@ -253,6 +254,7 @@ const FocusTimer: React.FC<FocusTimerProps> = ({ onSessionComplete }) => {
         position: 'relative',
         zIndex: 10,
       }}
+      className="focus-timer-container"
     >
       <Title
         order={2}

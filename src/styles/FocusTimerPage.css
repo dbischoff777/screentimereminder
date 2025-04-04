@@ -1,0 +1,74 @@
+/* Custom styles for the FocusTimer when used in DetailedAnalytics */
+
+/* Add basic styles for the focus page container */
+.mantine-Tabs-panel[data-active-tab="focus"] {
+  margin-bottom: 40px; /* Ensure enough space below */
+}
+
+/* Create space for dropdown menus */
+.mantine-Tabs-panel[data-active-tab="focus"] .cyber-button-wrapper {
+  margin-bottom: 10px;
+  position: relative;
+  z-index: 100;
+}
+
+/* Custom styles for the focus timer container */
+.focus-timer-container {
+  transition: padding-bottom 0.3s ease;
+}
+
+/* Ensure dropdowns styles */
+.custom-dropdown-menu {
+  position: fixed !important;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 10000;
+}
+
+/* Special styling for category dropdown that opens upward */
+.custom-dropdown-menu.position-top {
+  border-bottom: none;
+  border-top: 1px solid rgba(255, 0, 255, 0.3);
+  box-shadow: 0 -8px 16px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Push the page content up when a dropdown is open */
+.dropdown-open-space {
+  padding-bottom: 200px !important;
+}
+
+/* Special handling for bottom positioned elements */
+.position-bottom-safe {
+  max-height: 250px !important;
+  bottom: auto !important;
+  box-shadow: 0 -8px 20px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Adjust styles on mobile */
+@media (max-width: 800px) {
+  /* Add extra padding to the container on mobile */
+  .focus-timer-container {
+    padding-bottom: 3rem !important;
+  }
+  
+  /* Adjust dropdown height on mobile */
+  .custom-dropdown-menu {
+    max-height: 180px !important;
+  }
+  
+  /* Handle the scroll position for the Focus Category dropdown */
+  .dropdown-wrapper:last-child .custom-dropdown-menu {
+    transform: translateY(-20px);
+  }
+}
+
+/* Add a specific class for the focus timer category dropdown */
+.focus-category-dropdown {
+  margin-bottom: 100px !important;
+}
+
+/* When category dropdown is open, add space */
+.category-dropdown-open {
+  padding-bottom: 200px !important;
+  transition: padding-bottom 0.3s ease;
+} 

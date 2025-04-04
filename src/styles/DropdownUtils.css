@@ -1,0 +1,65 @@
+/* Global dropdown positioning utilities */
+
+/* Ensure containers don't clip dropdown content */
+.mantine-Container-root,
+.mantine-Paper-root,
+.mantine-Card-root,
+.mantine-Tabs-panel {
+  overflow-y: visible !important; 
+  overflow-x: hidden !important;
+  position: relative !important;
+}
+
+/* For select dropdowns to not get cut off */
+.mantine-Select-dropdown,
+.mantine-MultiSelect-dropdown,
+.mantine-Autocomplete-dropdown {
+  z-index: 10000 !important;
+  max-height: 60vh !important;
+  position: fixed !important;
+}
+
+/* Ensure proper stacking with high z-index */
+.mantine-Select-root,
+.mantine-MultiSelect-root,
+.mantine-Autocomplete-root,
+.mantine-Input-root,
+.mantine-InputWrapper-root {
+  position: relative !important;
+  z-index: 10 !important;
+}
+
+/* For positioning select dropdowns near the bottom */
+.mantine-Select-dropdown[data-position="bottom"],
+.mantine-MultiSelect-dropdown[data-position="bottom"],
+.mantine-Autocomplete-dropdown[data-position="bottom"] {
+  bottom: auto !important;
+  max-height: 40vh !important;
+}
+
+/* For positioning select dropdowns near the top */
+.mantine-Select-dropdown[data-position="top"],
+.mantine-MultiSelect-dropdown[data-position="top"],
+.mantine-Autocomplete-dropdown[data-position="top"] {
+  top: auto !important;
+  max-height: 40vh !important;
+}
+
+/* Ensure scrollable content inside dropdowns */
+.mantine-Select-itemsWrapper,
+.mantine-MultiSelect-itemsWrapper,
+.mantine-Autocomplete-itemsWrapper {
+  max-height: 40vh !important;
+  overflow-y: auto !important;
+}
+
+/* For mobile devices - ensure dropdowns are visible */
+@media screen and (max-width: 800px) {
+  .mantine-Select-dropdown,
+  .mantine-MultiSelect-dropdown,
+  .mantine-Autocomplete-dropdown {
+    max-height: 50vh !important;
+    width: 90vw !important;
+    left: 5vw !important;
+  }
+} 
