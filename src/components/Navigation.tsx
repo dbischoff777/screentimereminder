@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { FiHome, FiBarChart2, FiSettings } from 'react-icons/fi';
+import { FiHome, FiBarChart2, FiSettings, FiPieChart } from 'react-icons/fi';
 
 const Navigation = () => {
   const location = useLocation();
@@ -14,6 +14,7 @@ const Navigation = () => {
   const navItems = [
     { path: '/', label: 'Home', icon: <FiHome size={24} /> },
     { path: '/statistics', label: 'Stats', icon: <FiBarChart2 size={24} /> },
+    { path: '/detailed', label: 'Details', icon: <FiPieChart size={24} /> },
     { path: '/settings', label: 'Settings', icon: <FiSettings size={24} /> },
   ];
 

@@ -10,6 +10,7 @@ import Home from '../pages/Home.tsx';
 import Statistics from '../pages/Statistics.tsx';
 import Settings from '../pages/Settings.tsx';
 import NotificationPermission from '../pages/NotificationPermission.tsx';
+import DetailedAnalytics from '../pages/DetailedAnalytics.tsx';
 
 // Components
 import Navigation from './Navigation.tsx';
@@ -93,6 +94,7 @@ function App() {
             <Route path="/statistics" element={<Statistics />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/notification-permission" element={<NotificationPermission />} />
+            <Route path="/detailed" element={<DetailedAnalytics />} />
           </Routes>
           <Navigation />
         </div>

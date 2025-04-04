@@ -4,6 +4,10 @@ import { useState, useEffect } from 'react';
 import { ScreenTimeProvider } from './context/ScreenTimeContext';
 import PermissionDebug from './pages/PermissionDebug';
 import NotificationPermission from './pages/NotificationPermission';
+import DetailedAnalytics from './pages/DetailedAnalytics';
+import Statistics from './pages/Statistics';
+import Settings from './pages/Settings';
+import Navigation from './components/Navigation';
 
 // Simple debug component to display when in debug mode
 const DebugMode = () => {
@@ -160,7 +164,11 @@ function App() {
             } />
             <Route path="/permission-debug" element={<PermissionDebug />} />
             <Route path="/notification-permission" element={<NotificationPermission />} />
+            <Route path="/statistics" element={<Statistics />} />
+            <Route path="/settings" element={<Settings />} />
+            <Route path="/detailed" element={<DetailedAnalytics />} />
           </Routes>
+          <Navigation />
         </Router>
       </ScreenTimeProvider>
     </MantineProvider>
