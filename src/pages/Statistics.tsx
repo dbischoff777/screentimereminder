@@ -840,6 +840,167 @@ const Statistics = () => {
                   ))}
                 </div>
               </div>
+
+              {/* Usage Insights Dashboard */}
+              <div
+                style={{
+                  padding: '1.5rem',
+                  background: 'transparent',
+                  borderTop: '1px solid #FF00FF',
+                  borderBottom: '1px solid #FF00FF',
+                  marginBottom: '1.5rem',
+                }}
+              >
+                <Title
+                  order={3}
+                  style={{
+                    color: '#FF00FF',
+                    marginBottom: '1.5rem',
+                    textShadow: '0 0 5px #FF00FF',
+                  }}
+                >
+                  Usage Insights
+                </Title>
+
+                <Grid>
+                  {/* Most Used App */}
+                  <Grid.Col span={6}>
+                    <Paper
+                      style={{
+                        background: 'rgba(0, 0, 32, 0.3)',
+                        padding: '1rem',
+                        borderRadius: '8px',
+                        height: '100%'
+                      }}
+                    >
+                      <Text size="lg" fw={700} style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
+                        Most Used App
+                      </Text>
+                      {sortedApps[0] ? (
+                        <>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+                            {sortedApps[0].icon ? (
+                              <img
+                                src={`data:image/png;base64,${sortedApps[0].icon}`}
+                                alt={sortedApps[0].name}
+                                style={{
+                                  width: '32px',
+                                  height: '32px',
+                                  borderRadius: '8px'
+                                }}
+                              />
+                            ) : (
+                              <div style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '8px',
+                                backgroundColor: sortedApps[0].color,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: '#FFFFFF'
+                              }}>
+                                {sortedApps[0].name.charAt(0)}
+                              </div>
+                            )}
+                            <Text style={{ color: '#FFFFFF' }}>{sortedApps[0].name}</Text>
+                          </div>
+                          <Text size="sm" style={{ color: '#AAAAAA' }}>
+                            {formatDetailedTime(sortedApps[0].time)} ({Math.round((sortedApps[0].time / totalTodayScreenTime) * 100)}% of total)
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={{ color: '#AAAAAA' }}>No data available</Text>
+                      )}
+                    </Paper>
+                  </Grid.Col>
+
+                  {/* Peak Usage Time */}
+                  <Grid.Col span={6}>
+                    <Paper
+                      style={{
+                        background: 'rgba(0, 0, 32, 0.3)',
+                        padding: '1rem',
+                        borderRadius: '8px',
+                        height: '100%'
+                      }}
+                    >
+                      <Text size="lg" fw={700} style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
+                        Peak Usage Time
+                      </Text>
+                      {heatmapData.some(value => value > 0) ? (
+                        <>
+                          <Text style={{ color: '#FFFFFF', marginBottom: '0.5rem' }}>
+                            {formatHour(heatmapData.indexOf(Math.max(...heatmapData)))}
+                          </Text>
+                          <Text size="sm" style={{ color: '#AAAAAA' }}>
+                            {Math.round(Math.max(...heatmapData))} minutes of activity
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={{ color: '#AAAAAA' }}>No data available</Text>
+                      )}
+                    </Paper>
+                  </Grid.Col>
+
+                  {/* Usage Pattern */}
+                  <Grid.Col span={6}>
+                    <Paper
+                      style={{
+                        background: 'rgba(0, 0, 32, 0.3)',
+                        padding: '1rem',
+                        borderRadius: '8px',
+                        height: '100%'
+                      }}
+                    >
+                      <Text size="lg" fw={700} style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
+                        Usage Pattern
+                      </Text>
+                      {totalTodayScreenTime > 0 ? (
+                        <>
+                          <Text style={{ color: '#FFFFFF', marginBottom: '0.5rem' }}>
+                            {totalTodayScreenTime > screenTimeLimit ? 'Heavy' :
+                             totalTodayScreenTime > screenTimeLimit * 0.75 ? 'Moderate' : 'Light'} Usage
+                          </Text>
+                          <Text size="sm" style={{ color: '#AAAAAA' }}>
+                            {Math.round((totalTodayScreenTime / screenTimeLimit) * 100)}% of daily limit
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={{ color: '#AAAAAA' }}>No data available</Text>
+                      )}
+                    </Paper>
+                  </Grid.Col>
+
+                  {/* App Diversity */}
+                  <Grid.Col span={6}>
+                    <Paper
+                      style={{
+                        background: 'rgba(0, 0, 32, 0.3)',
+                        padding: '1rem',
+                        borderRadius: '8px',
+                        height: '100%'
+                      }}
+                    >
+                      <Text size="lg" fw={700} style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
+                        App Diversity
+                      </Text>
+                      {sortedTimelineData.length > 0 ? (
+                        <>
+                          <Text style={{ color: '#FFFFFF', marginBottom: '0.5rem' }}>
+                            {sortedTimelineData.length} apps used today
+                          </Text>
+                          <Text size="sm" style={{ color: '#AAAAAA' }}>
+                            Most active: {sortedApps.slice(0, 3).map(app => app.name).join(', ')}
+                          </Text>
+                        </>
+                      ) : (
+                        <Text style={{ color: '#AAAAAA' }}>No data available</Text>
+                      )}
+                    </Paper>
+                  </Grid.Col>
+                </Grid>
+              </div>
             </Tabs.Panel>
           </>
         )}
