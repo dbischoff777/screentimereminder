@@ -692,9 +692,126 @@ const Statistics = () => {
         </Tabs.Panel>
 
         <Tabs.Panel value="detailed">
-          <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
-            Detailed view coming soon
-          </Text>
+          <div style={{ padding: '1rem' }}>
+            {/* Date header with total time */}
+            <div style={{
+              background: '#FFFFFF',
+              padding: '1rem',
+              borderRadius: '8px',
+              marginBottom: '1rem'
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                color: '#6B46C1',
+                fontSize: '1.25rem',
+                fontWeight: 'bold'
+              }}>
+                <div>
+                  {new Date().toLocaleDateString('en-US', { 
+                    month: 'short',
+                    day: 'numeric'
+                  }).toUpperCase()}
+                </div>
+                <div>
+                  {formatDetailedTime(totalTodayScreenTime)}
+                </div>
+              </div>
+            </div>
+
+            {/* App list */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+              gap: '1rem'
+            }}>
+              {sortedTimelineData.map((app, index) => (
+                <div
+                  key={index}
+                  style={{
+                    background: '#FFFFFF',
+                    borderRadius: '8px',
+                    padding: '1rem',
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}
+                >
+                  {/* App name */}
+                  <div style={{
+                    fontSize: '1.1rem',
+                    fontWeight: 'bold',
+                    color: '#1A1A1A',
+                    marginBottom: '0.5rem'
+                  }}>
+                    {app.name}
+                  </div>
+
+                  {/* App icon and stats */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '1rem'
+                  }}>
+                    {/* App icon */}
+                    <div style={{
+                      width: '48px',
+                      height: '48px',
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      backgroundColor: app.color,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}>
+                      {app.icon ? (
+                        <img
+                          src={`data:image/png;base64,${app.icon}`}
+                          alt={app.name}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover'
+                          }}
+                        />
+                      ) : (
+                        <div style={{
+                          color: '#FFFFFF',
+                          fontSize: '24px',
+                          fontWeight: 'bold'
+                        }}>
+                          {app.name.charAt(0)}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Usage stats */}
+                    <div style={{
+                      flex: 1,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.25rem'
+                    }}>
+                      {/* Time used */}
+                      <div style={{
+                        fontSize: '1.1rem',
+                        color: '#1A1A1A'
+                      }}>
+                        {formatDetailedTime(app.time)}
+                      </div>
+                      {/* Percentage */}
+                      <div style={{
+                        fontSize: '0.9rem',
+                        color: '#666666'
+                      }}>
+                        {Math.round((app.time / totalTodayScreenTime) * 100)}%
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </Tabs.Panel>
       </Tabs>
 
