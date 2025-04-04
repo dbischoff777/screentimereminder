@@ -110,6 +110,32 @@ const Statistics = () => {
 
   const sortedTimelineData = getCurrentDayData();
 
+  // Calculate total screen time for today from all apps in timeline
+  const getTotalTodayScreenTime = () => {
+    return sortedTimelineData.reduce((sum, app) => sum + app.time, 0);
+  };
+
+  const totalTodayScreenTime = getTotalTodayScreenTime();
+
+  // Get filtered and sorted apps for breakdown and distribution sections
+  const getFilteredApps = () => {
+    const totalTime = totalTodayScreenTime; // Use the total time from all apps
+
+    return sortedTimelineData
+      .filter(app => {
+        // Only include apps with usage time
+        if (!app.time || app.time <= 0) return false;
+        
+        // Calculate percentage of total screen time
+        const percentage = (app.time / totalTime) * 100;
+        // Only show apps with 5% or more usage
+        return percentage >= 5;
+      })
+      .sort((a, b) => b.time - a.time);
+  };
+
+  const sortedApps = getFilteredApps();
+
   // Format time for display (e.g., "2 minutes 24 seconds")
   const formatDetailedTime = (minutes: number) => {
     if (minutes < 1/60) { // Less than 1 minute
@@ -140,14 +166,6 @@ const Statistics = () => {
     });
   };
 
-  // Sort apps by usage time (descending) and filter out apps with less than 5% usage
-  const sortedApps = [...appUsageData]
-    .filter(app => {
-      const percentage = (app.time / getTotalScreenTime()) * 100;
-      return percentage >= 5; // Only show apps with 5% or more usage
-    })
-    .sort((a, b) => b.time - a.time);
-  
   // Format time (minutes) to hours and minutes
   const formatTime = (minutes: number) => {
     const hours = Math.floor(minutes / 60);
@@ -705,7 +723,7 @@ const Statistics = () => {
             
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
               <Text size="xl" style={{ color: '#00FFFF', marginRight: '10px' }}>
-                {formatTime(totalScreenTime)} used
+                {formatTime(totalTodayScreenTime)} used
               </Text>
               <Badge 
                 style={{ 
@@ -721,7 +739,7 @@ const Statistics = () => {
             <Text style={{ color: '#00FFFF' }}>
               {percentOfLimit >= 100 
                 ? 'You have reached your daily screen time limit!' 
-                : `${formatTime(screenTimeLimit - totalScreenTime)} remaining of your ${formatTime(screenTimeLimit)} limit`}
+                : `${formatTime(screenTimeLimit - totalTodayScreenTime)} remaining of your ${formatTime(screenTimeLimit)} limit`}
             </Text>
 
             <Text size="sm" style={{ color: '#AAAAAA', marginTop: '1rem', fontStyle: 'italic' }}>
@@ -735,11 +753,11 @@ const Statistics = () => {
               thickness={12}
               roundCaps
               sections={[
-                { value: percentOfLimit, color: getStatusColor(percentOfLimit) },
+                { value: (totalTodayScreenTime / screenTimeLimit) * 100, color: getStatusColor(percentOfLimit) },
               ]}
               label={
                 <Text size="lg" style={{ color: '#FF00FF', textAlign: 'center' }}>
-                  {Math.round(percentOfLimit)}%
+                  {Math.round((totalTodayScreenTime / screenTimeLimit) * 100)}%
                 </Text>
               }
             />
@@ -768,7 +786,7 @@ const Statistics = () => {
           App Usage Breakdown
         </Title>
         
-        {appUsageData.length === 0 || totalScreenTime === 0 ? (
+        {sortedApps.length === 0 || totalTodayScreenTime === 0 ? (
           <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
             No app usage data recorded yet. Usage data will appear here as you use your device.
           </Text>
@@ -822,7 +840,7 @@ const Statistics = () => {
               App Distribution
             </Title>
 
-            {totalScreenTime === 0 ? (
+            {totalTodayScreenTime === 0 ? (
               <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
                 No usage data available yet
               </Text>
@@ -846,7 +864,7 @@ const Statistics = () => {
                       {formatTime(app.time)}
                     </Text>
                     <Text size="sm" style={{ color: '#AAAAAA', width: '50px', textAlign: 'right' }}>
-                      {Math.round((app.time / totalScreenTime) * 100)}%
+                      {Math.round((app.time / totalTodayScreenTime) * 100)}%
                     </Text>
                   </div>
                 ))}
@@ -855,18 +873,18 @@ const Statistics = () => {
           </Grid.Col>
           
           <Grid.Col span={6} style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            {totalScreenTime > 0 && (
+            {totalTodayScreenTime > 0 && (
               <RingProgress
                 size={150}
                 thickness={12}
                 roundCaps
                 sections={sortedApps.map(app => ({
-                  value: (app.time / totalScreenTime) * 100,
+                  value: (app.time / totalTodayScreenTime) * 100,
                   color: app.color,
                 }))}
                 label={
                   <Text size="lg" style={{ color: '#FF00FF', textAlign: 'center' }}>
-                    {formatTime(totalScreenTime)}
+                    {formatTime(totalTodayScreenTime)}
                   </Text>
                 }
               />
@@ -896,7 +914,7 @@ const Statistics = () => {
           Detailed App Usage
         </Title>
         
-        {sortedApps.length === 0 || totalScreenTime === 0 ? (
+        {sortedApps.length === 0 || totalTodayScreenTime === 0 ? (
           <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
             No app usage data recorded yet. Data will appear as you use your device.
           </Text>
@@ -919,7 +937,7 @@ const Statistics = () => {
                     </Text>
                     <Text size="sm" style={{ color: '#AAAAAA' }}>
                       {app.lastUsed 
-                        ? `Last used: ${new Date(app.lastUsed).toLocaleDateString()}`
+                        ? `Last used: ${new Date(app.lastUsed).toLocaleTimeString()}`
                         : 'No usage data'}
                     </Text>
                   </div>
@@ -928,7 +946,7 @@ const Statistics = () => {
                       {formatTime(app.time)}
                     </Text>
                     <Text size="sm" style={{ color: '#AAAAAA' }}>
-                      {Math.round((app.time / totalScreenTime) * 100)}% of total
+                      {Math.round((app.time / totalTodayScreenTime) * 100)}% of total
                     </Text>
                   </div>
                 </div>
@@ -945,7 +963,7 @@ const Statistics = () => {
                   <div 
                     style={{ 
                       height: '100%', 
-                      width: `${(app.time / totalScreenTime) * 100}%`, 
+                      width: `${(app.time / totalTodayScreenTime) * 100}%`, 
                       background: app.color 
                     }} 
                   />

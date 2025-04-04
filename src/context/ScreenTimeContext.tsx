@@ -446,9 +446,19 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     };
   }, []);
 
-  // Calculate total screen time across all apps
-  const getTotalScreenTime = (): number => {
-    return appUsageData.reduce((total, app) => total + app.time, 0);
+  // Get total screen time for today
+  const getTotalScreenTime = () => {
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+
+    // Include all apps used today, regardless of usage percentage
+    return appUsageData
+      .filter(app => {
+        const appTime = app.lastUsed ? new Date(app.lastUsed) : null;
+        return appTime && appTime >= startOfDay && appTime <= endOfDay;
+      })
+      .reduce((total, app) => total + (app.time || 0), 0);
   };
 
   // Initialize notifications and check battery optimization
@@ -540,28 +550,16 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     }
   };
 
-  // Update the checkScreenTimeLimit function to log errors
+  // Update the checkScreenTimeLimit function to use today's total time
   const checkScreenTimeLimit = async () => {
     try {
       console.log('Starting screen time limit check...');
       
-      // Get total screen time
+      // Get total screen time for today using the same calculation as the statistics page
       const totalTime = getTotalScreenTime();
-      console.log('Total screen time calculated:', totalTime);
+      console.log('Total screen time for today:', totalTime);
       
-      // Ensure we have valid values
-      if (typeof totalTime !== 'number' || isNaN(totalTime)) {
-        console.error('Invalid total time:', totalTime);
-        logError('Invalid total time calculated');
-        return;
-      }
-      
-      if (typeof screenTimeLimit !== 'number' || screenTimeLimit <= 0) {
-        console.error('Invalid screen time limit:', screenTimeLimit);
-        logError('Invalid screen time limit');
-        return;
-      }
-      
+      // Calculate remaining minutes
       const remainingMinutes = Math.max(0, screenTimeLimit - totalTime);
       console.log('Remaining minutes:', remainingMinutes);
       
@@ -570,34 +568,24 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
         return;
       }
 
-      // Use native notification method
+      // Call native method with exact values from our calculations
       const appUsageTracker = AppUsageTrackerService.getInstance();
-      console.log('Calling native checkScreenTimeLimit with params:', {
+      console.log('Calling native checkScreenTimeLimit with values:', {
         totalTime: Math.round(totalTime),
-        limit: Math.round(screenTimeLimit),
+        limit: screenTimeLimit,
         remainingMinutes: Math.round(remainingMinutes)
       });
       
-      try {
-        await appUsageTracker.checkScreenTimeLimit({
-          totalTime: Math.round(totalTime),
-          limit: Math.round(screenTimeLimit),
-          remainingMinutes: Math.round(remainingMinutes)
-        });
-        console.log('Native checkScreenTimeLimit completed successfully');
-      } catch (nativeError: any) {
-        console.error('Native checkScreenTimeLimit failed:', nativeError);
-        throw new Error(`Native check failed: ${nativeError.message}`);
-      }
-
-      // Update localStorage to force UI update
-      localStorage.setItem('lastScreenTimeCheck', Date.now().toString());
-      console.log('Screen time check completed successfully');
-    } catch (error: any) {
+      await appUsageTracker.checkScreenTimeLimit({
+        totalTime: Math.round(totalTime),
+        limit: screenTimeLimit,
+        remainingMinutes: Math.round(remainingMinutes)
+      });
+      
+      console.log('Screen time limit check completed successfully');
+    } catch (error) {
       console.error('Error in checkScreenTimeLimit:', error);
-      logError(`Screen time limit check failed: ${error.message}`);
-      // Log additional context
-      logError(`Context: totalTime=${getTotalScreenTime()}, limit=${screenTimeLimit}, notifications=${notificationsEnabled}`);
+      logError(`Error in checkScreenTimeLimit: ${error}`);
     }
   };
 

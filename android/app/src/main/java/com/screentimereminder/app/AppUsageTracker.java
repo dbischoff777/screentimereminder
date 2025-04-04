@@ -405,24 +405,21 @@ public class AppUsageTracker extends Plugin {
             JSObject data = call.getData();
             Integer totalTime = data.has("totalTime") ? data.getInteger("totalTime") : 0;
             Integer limit = data.has("limit") ? data.getInteger("limit") : 120;
-            Integer remainingMinutes = data.has("remainingMinutes") ? 
-                data.getInteger("remainingMinutes") : Math.max(0, limit - totalTime);
+            Integer remainingMinutes = data.has("remainingMinutes") ? data.getInteger("remainingMinutes") : Math.max(0, limit - totalTime);
+            
+            Log.d(TAG, String.format("Checking screen time with values from JS - Total: %d minutes, Limit: %d minutes, Remaining: %d minutes",
+                totalTime, limit, remainingMinutes));
             
             // Save the limit to SharedPreferences
             SharedPreferences prefs = getContext().getSharedPreferences("ScreenTimeReminder", Context.MODE_PRIVATE);
             prefs.edit().putInt("screenTimeLimit", limit).apply();
             
-            // Log the raw values for debugging
-            Log.d(TAG, String.format("Raw parameters - Total: %s, Limit: %s, Remaining: %s", 
-                totalTime, limit, remainingMinutes));
-            
             // Get SharedPreferences for notification tracking
-            SharedPreferences notificationPrefs = getContext().getSharedPreferences("ScreenTimeReminder", Context.MODE_PRIVATE);
             long currentTime = System.currentTimeMillis();
             
             // Get last notification times
-            long lastLimitReachedNotification = notificationPrefs.getLong("lastLimitReachedNotification", 0);
-            long lastApproachingLimitNotification = notificationPrefs.getLong("lastApproachingLimitNotification", 0);
+            long lastLimitReachedNotification = prefs.getLong("lastLimitReachedNotification", 0);
+            long lastApproachingLimitNotification = prefs.getLong("lastApproachingLimitNotification", 0);
             
             // Define cooldown period (1 minute in milliseconds)
             long NOTIFICATION_COOLDOWN = 60 * 1000;
@@ -431,76 +428,30 @@ public class AppUsageTracker extends Plugin {
             boolean canShowLimitReached = (currentTime - lastLimitReachedNotification) >= NOTIFICATION_COOLDOWN;
             boolean canShowApproaching = (currentTime - lastApproachingLimitNotification) >= NOTIFICATION_COOLDOWN;
             
-            // Get fresh usage data right before showing notifications
-            long endTime = System.currentTimeMillis();
-            long startTime = endTime - (24 * 60 * 60 * 1000); // Last 24 hours
-            
-            Map<String, UsageStats> aggregatedStats = usageStatsManager.queryAndAggregateUsageStats(startTime, endTime);
-            
-            if (aggregatedStats != null && !aggregatedStats.isEmpty()) {
-                // Calculate fresh total screen time
-                long freshTotalTime = 0;
-                for (UsageStats stats : aggregatedStats.values()) {
-                    if (!isSystemApp(stats.getPackageName()) && 
-                        !stats.getPackageName().equals(getContext().getPackageName())) {
-                        freshTotalTime += stats.getTotalTimeInForeground();
-                    }
+            if (totalTime >= limit && canShowLimitReached) {
+                // Show limit reached notification with exact data from JS
+                try {
+                    notificationService.showLimitReachedNotification(totalTime, limit);
+                    Log.d(TAG, "Limit reached notification sent successfully with data from JS");
+                    // Update last notification time
+                    prefs.edit().putLong("lastLimitReachedNotification", currentTime).apply();
+                } catch (Exception e) {
+                    Log.e(TAG, "Error showing limit reached notification", e);
+                    throw e;
                 }
-                
-                // Convert to minutes
-                int freshTotalMinutes = (int) (freshTotalTime / 60000);
-                int freshRemainingMinutes = Math.max(0, limit - freshTotalMinutes);
-                
-                Log.d(TAG, String.format("Fresh data - Total: %d, Remaining: %d", 
-                    freshTotalMinutes, freshRemainingMinutes));
-                
-                if (freshTotalMinutes >= limit && canShowLimitReached) {
-                    // Show limit reached notification with fresh data
-                    try {
-                        notificationService.showLimitReachedNotification(freshTotalMinutes, limit);
-                        Log.d(TAG, "Limit reached notification sent successfully with fresh data");
-                        // Update last notification time
-                        notificationPrefs.edit().putLong("lastLimitReachedNotification", currentTime).apply();
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error showing limit reached notification", e);
-                        throw e;
-                    }
-                } else if (freshRemainingMinutes <= 5 && canShowApproaching) {
-                    // Show approaching limit notification with fresh data
-                    try {
-                        notificationService.showApproachingLimitNotification(freshTotalMinutes, limit, freshRemainingMinutes);
-                        Log.d(TAG, "Approaching limit notification sent successfully with fresh data");
-                        // Update last notification time
-                        notificationPrefs.edit().putLong("lastApproachingLimitNotification", currentTime).apply();
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error showing approaching limit notification", e);
-                        throw e;
-                    }
-                } else {
-                    Log.d(TAG, "Notifications skipped due to cooldown or conditions not met");
+            } else if (remainingMinutes <= 5 && remainingMinutes > 0 && canShowApproaching) {
+                // Show approaching limit notification with exact data from JS
+                try {
+                    notificationService.showApproachingLimitNotification(totalTime, limit, remainingMinutes);
+                    Log.d(TAG, "Approaching limit notification sent successfully with data from JS");
+                    // Update last notification time
+                    prefs.edit().putLong("lastApproachingLimitNotification", currentTime).apply();
+                } catch (Exception e) {
+                    Log.e(TAG, "Error showing approaching limit notification", e);
+                    throw e;
                 }
             } else {
-                Log.w(TAG, "No fresh usage data available, using provided values");
-                // Fallback to using provided values if no fresh data
-                if (totalTime >= limit && canShowLimitReached) {
-                    try {
-                        notificationService.showLimitReachedNotification(totalTime, limit);
-                        Log.d(TAG, "Limit reached notification sent successfully with provided values");
-                        notificationPrefs.edit().putLong("lastLimitReachedNotification", currentTime).apply();
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error showing limit reached notification", e);
-                        throw e;
-                    }
-                } else if (remainingMinutes <= 5 && canShowApproaching) {
-                    try {
-                        notificationService.showApproachingLimitNotification(totalTime, limit, remainingMinutes);
-                        Log.d(TAG, "Approaching limit notification sent successfully with provided values");
-                        notificationPrefs.edit().putLong("lastApproachingLimitNotification", currentTime).apply();
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error showing approaching limit notification", e);
-                        throw e;
-                    }
-                }
+                Log.d(TAG, "Notifications skipped due to cooldown or conditions not met");
             }
             
             JSObject ret = new JSObject();
@@ -898,5 +849,60 @@ public class AppUsageTracker extends Plugin {
         } catch (Exception e) {
             Log.e(TAG, "Error requesting app info permission", e);
         }
+    }
+
+    private long getTotalScreenTimeForToday() {
+        try {
+            long totalMinutes = 0;
+            long startTime = getStartOfDay();
+            long endTime = System.currentTimeMillis();
+            
+            UsageStatsManager usageStatsManager = (UsageStatsManager) getContext()
+                .getSystemService(Context.USAGE_STATS_SERVICE);
+            
+            if (usageStatsManager == null) {
+                Log.e(TAG, "UsageStatsManager is null");
+                return 0;
+            }
+            
+            // Query for today's usage stats
+            Map<String, UsageStats> stats = usageStatsManager
+                .queryAndAggregateUsageStats(startTime, endTime);
+            
+            if (stats == null || stats.isEmpty()) {
+                Log.w(TAG, "No usage stats available for today");
+                return 0;
+            }
+            
+            // Calculate total time excluding our own app and system apps
+            String ourPackage = getContext().getPackageName();
+            for (Map.Entry<String, UsageStats> entry : stats.entrySet()) {
+                String packageName = entry.getKey();
+                UsageStats usageStats = entry.getValue();
+                
+                // Skip our own app and system apps
+                if (packageName.equals(ourPackage) || isSystemApp(packageName)) {
+                    continue;
+                }
+                
+                // Convert to minutes
+                long timeInForeground = usageStats.getTotalTimeInForeground();
+                totalMinutes += timeInForeground / (1000 * 60);
+            }
+            
+            return totalMinutes;
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting total screen time for today", e);
+            return 0;
+        }
+    }
+
+    private long getStartOfDay() {
+        Calendar calendar = Calendar.getInstance();
+        calendar.set(Calendar.HOUR_OF_DAY, 0);
+        calendar.set(Calendar.MINUTE, 0);
+        calendar.set(Calendar.SECOND, 0);
+        calendar.set(Calendar.MILLISECOND, 0);
+        return calendar.getTimeInMillis();
     }
 } 
