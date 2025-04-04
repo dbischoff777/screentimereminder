@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Paper, Text, Group, Badge, Stack, ScrollArea } from '@mantine/core';
-import { FiCheckCircle, FiXCircle, FiAlertCircle, FiClock } from 'react-icons/fi';
+import { FiCheckCircle, FiXCircle, FiAlertCircle, FiClock, FiImage } from 'react-icons/fi';
 import AppUsageTracker from '../services/AppUsageTracker';
+import { useScreenTime } from '../context/ScreenTimeContext';
 
 interface DebugInfo {
   usagePermission: boolean;
@@ -10,16 +11,27 @@ interface DebugInfo {
   backgroundTracking: boolean;
   lastUpdate: string;
   errors: string[];
+  appIconStatus: {
+    totalApps: number;
+    appsWithIcons: number;
+    missingIcons: string[];
+  };
 }
 
 const DebugPanel = () => {
+  const { appUsageData } = useScreenTime();
   const [debugInfo, setDebugInfo] = useState<DebugInfo>({
     usagePermission: false,
     batteryOptimization: false,
     notifications: false,
     backgroundTracking: false,
     lastUpdate: 'Never',
-    errors: []
+    errors: [],
+    appIconStatus: {
+      totalApps: 0,
+      appsWithIcons: 0,
+      missingIcons: []
+    }
   });
 
   const trackerService = AppUsageTracker.getInstance();
@@ -43,13 +55,23 @@ const DebugPanel = () => {
         // Get recent errors
         const errors = JSON.parse(localStorage.getItem('debugErrors') || '[]');
 
+        // Calculate app icon status
+        const missingIcons = appUsageData
+          .filter(app => !app.icon)
+          .map(app => app.name);
+        
         setDebugInfo({
           usagePermission: hasUsagePermission,
           batteryOptimization: isBatteryOptimizationExempt,
           notifications: notificationsEnabled,
           backgroundTracking,
           lastUpdate: lastUpdate ? new Date(parseInt(lastUpdate)).toLocaleTimeString() : 'Never',
-          errors
+          errors,
+          appIconStatus: {
+            totalApps: appUsageData.length,
+            appsWithIcons: appUsageData.filter(app => app.icon).length,
+            missingIcons
+          }
         });
       } catch (error: any) {
         console.error('Error checking debug status:', error);
@@ -67,7 +89,7 @@ const DebugPanel = () => {
     const interval = setInterval(checkStatus, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [appUsageData]);
 
   return (
     <Paper 
@@ -129,6 +151,45 @@ const DebugPanel = () => {
             {debugInfo.lastUpdate}
           </Badge>
         </Group>
+
+        {/* App Icon Status */}
+        <Group justify="space-between">
+          <Text size="sm" style={{ color: '#00FFFF' }}>App Icons</Text>
+          <Badge 
+            color={debugInfo.appIconStatus.appsWithIcons === debugInfo.appIconStatus.totalApps ? 'green' : 'yellow'}
+            leftSection={<FiImage />}
+          >
+            {debugInfo.appIconStatus.appsWithIcons}/{debugInfo.appIconStatus.totalApps}
+          </Badge>
+        </Group>
+
+        {/* Missing Icons List */}
+        {debugInfo.appIconStatus.missingIcons.length > 0 && (
+          <div>
+            <Text size="sm" style={{ color: '#FF00FF', marginBottom: '0.5rem' }}>
+              Apps Missing Icons
+            </Text>
+            <ScrollArea h={100}>
+              <Stack gap="xs">
+                {debugInfo.appIconStatus.missingIcons.map((appName, index) => (
+                  <Text 
+                    key={index} 
+                    size="xs" 
+                    style={{ 
+                      color: '#FF0000',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}
+                  >
+                    <FiAlertCircle />
+                    {appName}
+                  </Text>
+                ))}
+              </Stack>
+            </ScrollArea>
+          </div>
+        )}
 
         {/* Recent Errors */}
         <div>

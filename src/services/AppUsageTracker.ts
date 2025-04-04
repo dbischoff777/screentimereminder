@@ -9,6 +9,7 @@ export interface AppUsage {
   lastUsed?: Date;
   category: string;
   isActive?: boolean;
+  icon?: string; // Base64 encoded app icon
 }
 
 // Define the interface for our AppUsageTracker plugin
@@ -312,7 +313,8 @@ export default class AppUsageTrackerService {
           color,
           lastUsed: item.lastUsed ? new Date(item.lastUsed) : undefined,
           category: item.category || this.getCategoryForApp(appName),
-          isActive: item.isActive || false
+          isActive: item.isActive || false,
+          icon: item.icon || undefined
         };
         
         return appUsage;

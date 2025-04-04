@@ -19,6 +19,7 @@ interface AppUsage {
   lastUsed?: Date;
   category: string; // Added category field
   isActive?: boolean; // Track if app is currently active
+  icon?: string; // Base64 encoded app icon
 }
 
 interface ScreenTimeContextType {
@@ -661,7 +662,8 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
         lastUsed: app.lastUsed,
         category: app.category,
         color: getCategoryColor(app.category),
-        isActive: false
+        isActive: false,
+        icon: app.icon
       }));
       
       // Update state with the new data

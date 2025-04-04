@@ -232,44 +232,25 @@ const Statistics = () => {
   const heatmapData = generateHeatmapData();
   const maxUsage = getMaxUsage(heatmapData);
 
-  // Get color based on intensity
+  // Get color based on intensity with glow effect
   const getHeatmapColor = (value: number, maxValue: number) => {
-    if (value === 0) return 'rgba(240, 240, 255, 0.05)';
+    if (value === 0) return 'transparent';
     
     const ratio = value / maxValue;
+    let color;
     
-    // Define gradient colors
-    const colors = {
-      low: { r: 200, g: 200, b: 255 },
-      medium: { r: 100, g: 255, b: 100 },
-      high: { r: 255, g: 50, b: 50 }
-    };
-
-    let startColor, endColor, localRatio;
-
     if (ratio < 0.3) {
-      // Cool blue range
-      startColor = { r: 240, g: 240, b: 255 };
-      endColor = colors.low;
-      localRatio = ratio / 0.3;
+      // Cool blue/white for low usage
+      color = 'rgba(255, 255, 255, 0.4)';
     } else if (ratio < 0.6) {
-      // Blue to green range
-      startColor = colors.low;
-      endColor = colors.medium;
-      localRatio = (ratio - 0.3) / 0.3;
+      // Green for medium usage
+      color = 'rgba(100, 255, 100, 0.6)';
     } else {
-      // Green to red range
-      startColor = colors.medium;
-      endColor = colors.high;
-      localRatio = (ratio - 0.6) / 0.4;
+      // Red for high usage
+      color = 'rgba(255, 50, 50, 0.8)';
     }
 
-    // Interpolate between colors
-    const r = Math.round(startColor.r + (endColor.r - startColor.r) * localRatio);
-    const g = Math.round(startColor.g + (endColor.g - startColor.g) * localRatio);
-    const b = Math.round(startColor.b + (endColor.b - startColor.b) * localRatio);
-
-    return `rgba(${r}, ${g}, ${b}, ${0.3 + ratio * 0.7})`;
+    return color;
   };
 
   return (
@@ -411,19 +392,32 @@ const Statistics = () => {
                         padding: '2px',
                         marginRight: '16px'
                       }}>
-                        <div style={{
-                          width: '32px',
-                          height: '32px',
-                          borderRadius: '50%',
-                          background: app.color,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '16px',
-                          color: '#FFFFFF'
-                        }}>
-                          {app.name.charAt(0)}
-                        </div>
+                        {app.icon ? (
+                          <img
+                            src={`data:image/png;base64,${app.icon}`}
+                            alt={app.name}
+                            style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '50%',
+                              objectFit: 'cover'
+                            }}
+                          />
+                        ) : (
+                          <div style={{
+                            width: '32px',
+                            height: '32px',
+                            borderRadius: '50%',
+                            background: app.color,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '16px',
+                            color: '#FFFFFF'
+                          }}>
+                            {app.name.charAt(0)}
+                          </div>
+                        )}
                       </div>
                       
                       {/* App info */}
@@ -506,67 +500,96 @@ const Statistics = () => {
               ) : (
                 <>
                   <div style={{ 
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(24, minmax(60px, 1fr))',
-                    gap: '4px',
-                    marginBottom: '2rem',
+                    position: 'relative',
+                    width: '100%',
+                    height: '600px',
                     background: 'rgba(0, 0, 20, 0.3)',
                     padding: '16px',
                     borderRadius: '8px',
-                    minWidth: 'fit-content'
+                    marginBottom: '2rem',
+                    display: 'flex',
+                    flexDirection: 'column'
                   }}>
-                    {heatmapData.map((value, hour) => {
-                      const bgColor = getHeatmapColor(value, maxUsage);
-                      return (
-                        <div
-                          key={hour}
-                          style={{
-                            aspectRatio: '1',
-                            backgroundColor: bgColor,
-                            padding: '8px',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s ease',
-                            position: 'relative',
-                            boxShadow: value > 0 ? '0 0 15px rgba(255, 255, 255, 0.1)' : 'none',
-                            minWidth: '60px',
-                            borderRadius: '4px',
-                            transform: 'scale(1)'
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.transform = 'scale(1.05)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.transform = 'scale(1)';
-                          }}
-                        >
-                          <Text 
-                            size="sm" 
-                            style={{ 
-                              color: '#FFFFFF',
-                              fontWeight: 500,
-                              marginBottom: '2px',
-                              textShadow: value > maxUsage / 2 ? '0 0 4px rgba(0,0,0,0.5)' : 'none'
-                            }}
-                          >
-                            {formatHour(hour)}
-                          </Text>
-                          <Text 
-                            size="xs" 
-                            style={{ 
-                              color: '#FFFFFF',
+                    {/* Time labels */}
+                    {Array.from({ length: 12 }).map((_, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          position: 'absolute',
+                          left: 0,
+                          top: `${(i * 100) / 12}%`,
+                          color: '#AAAAAA',
+                          fontSize: '0.8rem',
+                          transform: 'translateY(-50%)',
+                          padding: '0 8px'
+                        }}
+                      >
+                        {`${(i * 2).toString().padStart(2, '0')}:00`}
+                      </div>
+                    ))}
+
+                    {/* Horizontal grid lines */}
+                    {Array.from({ length: 12 }).map((_, i) => (
+                      <div
+                        key={i}
+                        style={{
+                          position: 'absolute',
+                          left: '40px',
+                          right: 0,
+                          top: `${(i * 100) / 12}%`,
+                          height: '1px',
+                          background: 'rgba(255, 255, 255, 0.1)'
+                        }}
+                      />
+                    ))}
+
+                    {/* Heatmap points */}
+                    <div style={{
+                      position: 'absolute',
+                      left: '40px',
+                      right: 0,
+                      top: 0,
+                      bottom: 0,
+                      padding: '16px'
+                    }}>
+                      {heatmapData.map((value, hour) => {
+                        if (value === 0) return null;
+                        const yPosition = (hour * 100) / 24;
+                        const intensity = value / maxUsage;
+                        const size = 20 + (intensity * 30); // Size varies with intensity
+                        const color = getHeatmapColor(value, maxUsage);
+                        
+                        return (
+                          <div
+                            key={hour}
+                            style={{
+                              position: 'absolute',
+                              left: '50%',
+                              top: `${yPosition}%`,
+                              width: `${size}px`,
+                              height: `${size}px`,
+                              transform: 'translate(-50%, -50%)',
+                              background: color,
+                              borderRadius: '50%',
+                              filter: `blur(${10 + (intensity * 10)}px)`,
                               opacity: 0.8,
-                              textShadow: value > maxUsage / 2 ? '0 0 4px rgba(0,0,0,0.5)' : 'none'
                             }}
-                          >
-                            {value > 0 ? `${Math.round(value)}m` : '-'}
-                          </Text>
-                        </div>
-                      );
-                    })}
+                          />
+                        );
+                      })}
+                    </div>
+
+                    {/* Current time indicator */}
+                    <div style={{
+                      position: 'absolute',
+                      left: '40px',
+                      right: 0,
+                      top: `${(new Date().getHours() * 100) / 24}%`,
+                      width: '100%',
+                      height: '2px',
+                      background: 'rgba(255, 255, 255, 0.5)',
+                      zIndex: 2
+                    }} />
                   </div>
 
                   {/* Legend */}
@@ -586,8 +609,9 @@ const Statistics = () => {
                       <div style={{
                         width: '16px',
                         height: '16px',
-                        backgroundColor: getHeatmapColor(maxUsage * 0.15, maxUsage),
-                        borderRadius: '2px'
+                        background: 'rgba(255, 255, 255, 0.4)',
+                        borderRadius: '50%',
+                        filter: 'blur(4px)'
                       }} />
                       <Text size="sm" style={{ color: '#AAAAAA' }}>
                         Low ({`< ${Math.round(maxUsage / 3)}m`})
@@ -601,8 +625,9 @@ const Statistics = () => {
                       <div style={{
                         width: '16px',
                         height: '16px',
-                        backgroundColor: getHeatmapColor(maxUsage * 0.45, maxUsage),
-                        borderRadius: '2px'
+                        background: 'rgba(100, 255, 100, 0.6)',
+                        borderRadius: '50%',
+                        filter: 'blur(4px)'
                       }} />
                       <Text size="sm" style={{ color: '#AAAAAA' }}>
                         Medium ({`${Math.round(maxUsage / 3)}m - ${Math.round(maxUsage * 2 / 3)}m`})
@@ -616,8 +641,9 @@ const Statistics = () => {
                       <div style={{
                         width: '16px',
                         height: '16px',
-                        backgroundColor: getHeatmapColor(maxUsage * 0.8, maxUsage),
-                        borderRadius: '2px'
+                        background: 'rgba(255, 50, 50, 0.8)',
+                        borderRadius: '50%',
+                        filter: 'blur(4px)'
                       }} />
                       <Text size="sm" style={{ color: '#AAAAAA' }}>
                         High ({`> ${Math.round(maxUsage * 2 / 3)}m`})

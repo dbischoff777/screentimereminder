@@ -249,7 +249,6 @@ public class AppUsageTracker extends Plugin {
                   " to " + new java.util.Date(endTime));
             
             // Use queryAndAggregateUsageStats for more efficient data retrieval
-            // This automatically uses INTERVAL_BEST and merges stats by package name
             Map<String, UsageStats> aggregatedStats = usageStatsManager.queryAndAggregateUsageStats(startTime, endTime);
             
             if (aggregatedStats == null || aggregatedStats.isEmpty()) {
@@ -322,34 +321,16 @@ public class AppUsageTracker extends Plugin {
                     appUsage.put("time", timeInMinutes);
                     appUsage.put("lastUsed", stats.getLastTimeUsed());
                     
+                    // Log icon status
+                    String iconBase64 = appUsage.optString("icon", "");
+                    Log.d(TAG, "App " + appUsage.optString("name", packageName) + 
+                          " - Icon available: " + (iconBase64 != null && !iconBase64.isEmpty()));
+                    
                     usageData.put(appUsage);
                     
                     Log.d(TAG, "App " + getAppName(packageName) + 
                           " used for " + timeInMinutes + " minutes");
                 }
-            }
-            
-            // Add test data if no real data is found (for debugging)
-            if (usageData.length() == 0) {
-                Log.w(TAG, "No app usage data found, adding test data for debugging");
-                
-                // Add test data for Chrome
-                JSONObject chromeUsage = new JSONObject();
-                chromeUsage.put("packageName", "com.android.chrome");
-                chromeUsage.put("name", "Chrome");
-                chromeUsage.put("time", 15.0); // 15 minutes
-                chromeUsage.put("lastUsed", System.currentTimeMillis() - 30 * 60 * 1000); // 30 minutes ago
-                chromeUsage.put("category", "Productivity");
-                usageData.put(chromeUsage);
-                
-                // Add test data for YouTube
-                JSONObject youtubeUsage = new JSONObject();
-                youtubeUsage.put("packageName", "com.google.android.youtube");
-                youtubeUsage.put("name", "YouTube");
-                youtubeUsage.put("time", 45.0); // 45 minutes
-                youtubeUsage.put("lastUsed", System.currentTimeMillis() - 60 * 60 * 1000); // 1 hour ago
-                youtubeUsage.put("category", "Entertainment");
-                usageData.put(youtubeUsage);
             }
             
             // Log the final data for debugging
@@ -621,12 +602,18 @@ public class AppUsageTracker extends Plugin {
         JSONObject appUsage = new JSONObject();
         String appName = getAppName(packageName);
         String category = getCategoryForApp(appName);
+        String iconBase64 = getAppIconBase64(packageName);
+        
+        Log.d(TAG, "Creating app usage object for " + appName + 
+              " (package: " + packageName + ")" +
+              " - Icon available: " + (iconBase64 != null && !iconBase64.isEmpty()));
         
         appUsage.put("packageName", packageName);
         appUsage.put("name", appName);
         appUsage.put("time", 0.0);
         appUsage.put("lastUsed", 0);
         appUsage.put("category", category);
+        appUsage.put("icon", iconBase64);
         
         return appUsage;
     }
@@ -636,13 +623,65 @@ public class AppUsageTracker extends Plugin {
      */
     private String getAppName(String packageName) {
         PackageManager packageManager = getContext().getPackageManager();
-        try {
-            ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, 0);
-            return packageManager.getApplicationLabel(appInfo).toString();
-        } catch (PackageManager.NameNotFoundException e) {
-            Log.e(TAG, "Error getting app name for " + packageName, e);
-            return packageName;
+        
+        // First check if we have permission to access app info
+        if (!hasAppInfoPermission()) {
+            Log.w(TAG, "No permission to access app info, requesting permission");
+            requestAppInfoPermission();
+            // Fall back to package name extraction
+            return extractReadableName(packageName);
         }
+
+        try {
+            // First try with basic flags
+            ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, 0);
+            String appName = packageManager.getApplicationLabel(appInfo).toString();
+            Log.d(TAG, "Successfully got app name for " + packageName + ": " + appName);
+            return appName;
+        } catch (PackageManager.NameNotFoundException e) {
+            Log.w(TAG, "First attempt to get app name failed for " + packageName + ", trying alternative methods");
+            
+            try {
+                // Try with GET_META_DATA flag
+                ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA);
+                String appName = packageManager.getApplicationLabel(appInfo).toString();
+                Log.d(TAG, "Successfully got app name with GET_META_DATA for " + packageName + ": " + appName);
+                return appName;
+            } catch (PackageManager.NameNotFoundException e2) {
+                Log.w(TAG, "Second attempt to get app name failed for " + packageName + ", trying package info");
+                
+                try {
+                    // Try getting package info instead
+                    android.content.pm.PackageInfo pkgInfo = packageManager.getPackageInfo(packageName, 0);
+                    if (pkgInfo != null && pkgInfo.applicationInfo != null) {
+                        String appName = packageManager.getApplicationLabel(pkgInfo.applicationInfo).toString();
+                        Log.d(TAG, "Successfully got app name from package info for " + packageName + ": " + appName);
+                        return appName;
+                    }
+                } catch (PackageManager.NameNotFoundException e3) {
+                    Log.w(TAG, "All attempts to get app name failed for " + packageName);
+                }
+            }
+            
+            // If all attempts fail, extract a readable name from the package name
+            return extractReadableName(packageName);
+        }
+    }
+
+    private String extractReadableName(String packageName) {
+        String[] parts = packageName.split("\\.");
+        if (parts.length > 0) {
+            String lastPart = parts[parts.length - 1];
+            // Capitalize first letter and replace underscores with spaces
+            lastPart = lastPart.replace("_", " ");
+            lastPart = lastPart.substring(0, 1).toUpperCase() + 
+                      lastPart.substring(1).toLowerCase();
+            Log.d(TAG, "Using extracted name for " + packageName + ": " + lastPart);
+            return lastPart;
+        }
+        
+        Log.d(TAG, "Using package name as fallback for " + packageName);
+        return packageName;
     }
     
     /**
@@ -716,6 +755,148 @@ public class AppUsageTracker extends Plugin {
             return "Education";
         } else {
             return "Other";
+        }
+    }
+    
+    /**
+     * Get the app icon as a Base64 encoded string
+     */
+    private String getAppIconBase64(String packageName) {
+        try {
+            PackageManager packageManager = getContext().getPackageManager();
+            
+            // First check if we have permission to access app info
+            if (!hasAppInfoPermission()) {
+                Log.w(TAG, "No permission to access app info, skipping icon for " + packageName);
+                return "";
+            }
+            
+            // First try to get the application info
+            ApplicationInfo appInfo;
+            try {
+                appInfo = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA);
+            } catch (PackageManager.NameNotFoundException e) {
+                Log.w(TAG, "Package not found when getting icon for " + packageName + ", skipping icon");
+                return "";
+            }
+            
+            // Try to get the app icon
+            android.graphics.drawable.Drawable icon;
+            try {
+                // First try to get the adaptive icon (Android 8.0+)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    try {
+                        android.graphics.drawable.AdaptiveIconDrawable adaptiveIcon = 
+                            (android.graphics.drawable.AdaptiveIconDrawable) packageManager.getApplicationIcon(appInfo);
+                        if (adaptiveIcon != null) {
+                            android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(
+                                192, 192, android.graphics.Bitmap.Config.ARGB_8888);
+                            android.graphics.Canvas canvas = new android.graphics.Canvas(bitmap);
+                            adaptiveIcon.setBounds(0, 0, 192, 192);
+                            adaptiveIcon.draw(canvas);
+                            return bitmapToBase64(bitmap);
+                        }
+                    } catch (Exception e) {
+                        Log.d(TAG, "Adaptive icon not available for " + packageName + ", trying regular icon");
+                    }
+                }
+                
+                // Try to get the icon from the app's resources
+                try {
+                    icon = packageManager.getApplicationIcon(appInfo);
+                } catch (Exception e) {
+                    Log.d(TAG, "Failed to get application icon, trying activity icon for " + packageName);
+                    // Try to get the activity icon as fallback
+                    android.content.pm.ActivityInfo[] activities = packageManager.getPackageInfo(
+                        packageName, PackageManager.GET_ACTIVITIES).activities;
+                    if (activities != null && activities.length > 0) {
+                        icon = activities[0].loadIcon(packageManager);
+                    } else {
+                        throw e;
+                    }
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to get any icon for " + packageName + ", skipping icon");
+                return "";
+            }
+            
+            // Create a bitmap from the drawable
+            android.graphics.Bitmap bitmap;
+            
+            if (icon instanceof android.graphics.drawable.BitmapDrawable) {
+                bitmap = ((android.graphics.drawable.BitmapDrawable) icon).getBitmap();
+            } else {
+                // Create a new bitmap and draw the icon onto it
+                int width = Math.max(icon.getIntrinsicWidth(), 1);
+                int height = Math.max(icon.getIntrinsicHeight(), 1);
+                
+                bitmap = android.graphics.Bitmap.createBitmap(
+                    width,
+                    height,
+                    android.graphics.Bitmap.Config.ARGB_8888
+                );
+                android.graphics.Canvas canvas = new android.graphics.Canvas(bitmap);
+                icon.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
+                icon.draw(canvas);
+            }
+            
+            // Scale the bitmap to a reasonable size
+            android.graphics.Bitmap scaledBitmap = android.graphics.Bitmap.createScaledBitmap(
+                bitmap, 192, 192, true);
+            
+            return bitmapToBase64(scaledBitmap);
+            
+        } catch (Exception e) {
+            Log.w(TAG, "Error getting app icon for " + packageName + ", skipping icon", e);
+            return "";
+        }
+    }
+
+    private String bitmapToBase64(android.graphics.Bitmap bitmap) {
+        try {
+            java.io.ByteArrayOutputStream stream = new java.io.ByteArrayOutputStream();
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream);
+            byte[] bitmapData = stream.toByteArray();
+            String base64 = android.util.Base64.encodeToString(bitmapData, android.util.Base64.DEFAULT);
+            
+            // Log success
+            Log.d(TAG, "Successfully converted bitmap to Base64 (size: " + bitmapData.length + " bytes)");
+            
+            return base64;
+        } catch (Exception e) {
+            Log.e(TAG, "Error converting bitmap to Base64", e);
+            return "";
+        }
+    }
+
+    private boolean hasAppInfoPermission() {
+        try {
+            PackageManager packageManager = getContext().getPackageManager();
+            // Try to get info for a known system app to test permissions
+            packageManager.getApplicationInfo("android", 0);
+            return true;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;
+        }
+    }
+
+    private void requestAppInfoPermission() {
+        try {
+            // First try to open app info settings
+            Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+            intent.setData(android.net.Uri.parse("package:" + getContext().getPackageName()));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            
+            // Also request QUERY_ALL_PACKAGES permission if needed
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                Intent queryIntent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
+                queryIntent.setData(android.net.Uri.parse("package:" + getContext().getPackageName()));
+                queryIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(queryIntent);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error requesting app info permission", e);
         }
     }
 } 
