@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Paper, Text, Progress, Stack, Group, ActionIcon, Badge, Title } from '@mantine/core';
+import { Paper, Text, Progress, Stack, ActionIcon, Badge, Title } from '@mantine/core';
 import { FiPlay, FiPause, FiSkipForward, FiRotateCcw, FiChevronDown } from 'react-icons/fi';
 import '../styles/FocusTimer.css'; // Add this import for custom dropdown styling
 import '../styles/Mobile.css'; // Mobile-specific styling for Android
+import '../styles/Buttons.css';
 
 interface FocusTimerProps {
   onSessionComplete: (category: string, duration: number) => void;
@@ -324,67 +325,87 @@ const FocusTimer: React.FC<FocusTimerProps> = ({ onSessionComplete }) => {
         />
 
         {/* Controls */}
-        <Group justify="center" gap="md">
-          <ActionIcon
-            variant="filled"
-            size="lg"
-            radius="xl"
-            onClick={toggleTimer}
-            c={isRunning ? 'red' : 'green'}
-            bg={isRunning ? 'rgba(255, 0, 0, 0.2)' : 'rgba(0, 255, 0, 0.2)'}
-            styles={{
-              root: {
-                border: `1px solid ${isRunning ? '#FF0000' : '#00FF00'}`,
-                '&:hover': {
-                  transform: 'scale(1.1)',
-                  backgroundColor: isRunning ? 'rgba(255, 0, 0, 0.3)' : 'rgba(0, 255, 0, 0.3)',
-                }
-              }
-            }}
-          >
-            {isRunning ? <FiPause size={20} /> : <FiPlay size={20} />}
-          </ActionIcon>
+        <div className="controls-wrapper" style={{
+          padding: '1.2rem 0',
+          borderRadius: '8px',
+          backgroundColor: 'rgba(0, 0, 32, 0.5)',
+          backdropFilter: 'blur(10px)',
+          border: '1px solid rgba(255, 0, 255, 0.1)',
+          marginTop: '0.5rem',
+          marginBottom: '1.5rem',
+          display: 'flex',
+          justifyContent: 'center'
+        }}>
+          <div style={{ 
+            display: 'flex', 
+            width: '240px',
+            justifyContent: 'space-between',
+            alignItems: 'center'
+          }}>
+            <div className="cyber-button-wrapper">
+              <ActionIcon
+                variant="filled"
+                size="xl"
+                radius="xl"
+                onClick={resetTimer}
+                className="reset-btn"
+                style={{
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  color: '#FFFFFF',
+                  border: '2px solid rgba(255, 255, 255, 0.5)',
+                  boxShadow: '0 0 10px rgba(255, 255, 255, 0.2)',
+                  transition: 'all 0.3s ease',
+                  width: '50px',
+                  height: '50px'
+                }}
+              >
+                <FiRotateCcw size={24} />
+              </ActionIcon>
+            </div>
 
-          <ActionIcon
-            variant="filled"
-            size="lg"
-            radius="xl"
-            onClick={resetTimer}
-            c="white"
-            bg="rgba(255, 255, 255, 0.1)"
-            styles={{
-              root: {
-                border: '1px solid #FFFFFF',
-                '&:hover': {
-                  transform: 'scale(1.1)',
-                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                }
-              }
-            }}
-          >
-            <FiRotateCcw size={20} />
-          </ActionIcon>
+            <div className="cyber-button-wrapper">
+              <ActionIcon
+                variant="filled"
+                size="xl"
+                radius="xl"
+                onClick={toggleTimer}
+                className={`play-pause-btn ${isRunning ? 'pause-btn' : ''}`}
+                style={{
+                  backgroundColor: isRunning ? 'rgba(255, 0, 0, 0.2)' : 'rgba(0, 255, 0, 0.2)',
+                  color: isRunning ? '#FF0000' : '#00FF00',
+                  border: `2px solid ${isRunning ? '#FF0000' : '#00FF00'}`,
+                  boxShadow: `0 0 15px ${isRunning ? 'rgba(255, 0, 0, 0.3)' : 'rgba(0, 255, 0, 0.3)'}`,
+                  transition: 'all 0.3s ease',
+                  width: '50px',
+                  height: '50px'
+                }}
+              >
+                {isRunning ? <FiPause size={24} /> : <FiPlay size={24} />}
+              </ActionIcon>
+            </div>
 
-          <ActionIcon
-            variant="filled"
-            size="lg"
-            radius="xl"
-            onClick={skipTimer}
-            c="cyan"
-            bg="rgba(0, 255, 255, 0.1)"
-            styles={{
-              root: {
-                border: '1px solid #00FFFF',
-                '&:hover': {
-                  transform: 'scale(1.1)',
-                  backgroundColor: 'rgba(0, 255, 255, 0.2)',
-                }
-              }
-            }}
-          >
-            <FiSkipForward size={20} />
-          </ActionIcon>
-        </Group>
+            <div className="cyber-button-wrapper">
+              <ActionIcon
+                variant="filled"
+                size="xl"
+                radius="xl"
+                onClick={skipTimer}
+                className="skip-btn"
+                style={{
+                  backgroundColor: 'rgba(0, 255, 255, 0.1)',
+                  color: '#00FFFF',
+                  border: '2px solid #00FFFF',
+                  boxShadow: '0 0 10px rgba(0, 255, 255, 0.3)',
+                  transition: 'all 0.3s ease',
+                  width: '50px',
+                  height: '50px'
+                }}
+              >
+                <FiSkipForward size={24} />
+              </ActionIcon>
+            </div>
+          </div>
+        </div>
 
         {/* Category Selection */}
         <CustomDropdown
