@@ -14,7 +14,7 @@ const Statistics = () => {
   } = useScreenTime();
   const [totalScreenTime, setTotalScreenTime] = useState(0);
   const [percentOfLimit, setPercentOfLimit] = useState(0);
-  const [activeTab, setActiveTab] = useState('timeline');
+  const [activeTab, setActiveTab] = useState<string | null>('timeline');
   const location = useLocation();
   
   // Check if we're coming from the settings page after a reset
@@ -298,7 +298,7 @@ const Statistics = () => {
 
       <Tabs
         value={activeTab}
-        onChange={(value) => setActiveTab(value as string)}
+        onChange={(value) => setActiveTab(value === activeTab ? null : value as string)}
         style={{ marginBottom: '2rem' }}
         styles={{
           root: {
@@ -306,513 +306,543 @@ const Statistics = () => {
             maxWidth: '100%',
             overflow: 'hidden'
           },
+          list: {
+            display: 'flex',
+            flexDirection: 'row',
+            width: '100%',
+            gap: '2px',
+            backgroundColor: 'rgba(0, 0, 32, 0.3)',
+            padding: '2px',
+            borderRadius: '8px'
+          },
           tab: {
+            flex: '1',
             color: '#00FFFF',
-            fontSize: '1rem',
-            padding: '1rem 2rem',
+            fontSize: '0.9rem',
+            padding: '0.75rem 0.5rem',
+            textAlign: 'center',
+            backgroundColor: 'rgba(0, 0, 32, 0.5)',
+            transition: 'all 0.3s ease',
+            '&:first-of-type': {
+              borderTopLeftRadius: '6px',
+              borderBottomLeftRadius: '6px',
+            },
+            '&:last-of-type': {
+              borderTopRightRadius: '6px',
+              borderBottomRightRadius: '6px',
+            },
             '&[data-active]': {
               color: '#FF00FF',
+              backgroundColor: 'rgba(255, 0, 255, 0.1)',
               borderColor: '#FF00FF',
             },
+            '&:hover': {
+              backgroundColor: 'rgba(255, 0, 255, 0.05)',
+            }
           },
           panel: {
             color: '#00FFFF',
             padding: '1rem 0',
+            animation: 'fadeIn 0.3s ease',
           },
         }}
       >
-        <Tabs.List grow>
-          <Tabs.Tab value="heatmap">HEATMAP VIEW</Tabs.Tab>
-          <Tabs.Tab value="timeline">TIMELINE VIEW</Tabs.Tab>
-          <Tabs.Tab value="detailed">DETAILED VIEW</Tabs.Tab>
+        <Tabs.List>
+          <Tabs.Tab value="heatmap">HEATMAP</Tabs.Tab>
+          <Tabs.Tab value="timeline">TIMELINE</Tabs.Tab>
+          <Tabs.Tab value="detailed">DETAILED</Tabs.Tab>
         </Tabs.List>
 
-        <Tabs.Panel value="timeline">
-          <Title
-            order={2}
-            style={{
-              fontSize: '1.5rem',
-              marginBottom: '0.5rem',
-              color: '#00FFFF',
-            }}
-          >
-            Usage history
-          </Title>
-          <Text size="sm" style={{ color: '#AAAAAA', marginBottom: '2rem' }}>
-            Daily
-          </Text>
+        {activeTab && (
+          <>
+            <Tabs.Panel value="heatmap">
+              <div style={{ 
+                maxWidth: '100%',
+                margin: '0 auto',
+                padding: '0 1rem'
+              }}>
+                <Title
+                  order={2}
+                  style={{
+                    fontSize: '1.5rem',
+                    marginBottom: '0.5rem',
+                    color: '#00FFFF',
+                  }}
+                >
+                  Usage Heatmap
+                </Title>
+                <Text size="sm" style={{ color: '#AAAAAA', marginBottom: '1rem' }}>
+                  Daily activity pattern
+                </Text>
 
-          <div style={{ maxHeight: '600px', overflowY: 'auto', padding: '0 1rem' }}>
-            {sortedTimelineData.length === 0 ? (
-              <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
-                No activity history available for today.
-              </Text>
-            ) : (
-              <div style={{ position: 'relative' }}>
-                {/* Date header */}
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center',
-                  marginBottom: '1.5rem',
-                  marginLeft: '80px'
+                {/* Total usage circle */}
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'center',
+                  marginBottom: '2rem'
                 }}>
-                  <Text style={{ color: '#FFFFFF', fontWeight: 500 }}>
-                    {new Date().toLocaleDateString('en-US', { 
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric'
-                    })}
-                  </Text>
+                  <div style={{
+                    width: '120px',
+                    height: '120px',
+                    borderRadius: '50%',
+                    background: '#6B46C1',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#FFFFFF',
+                  }}>
+                    <Text size="xl" fw={700}>
+                      {Math.floor(totalScreenTime / 60)}h
+                    </Text>
+                    <Text size="sm">
+                      {Math.round(totalScreenTime % 60)}m
+                    </Text>
+                  </div>
                 </div>
 
-                {/* Timeline entries */}
-                <div style={{ position: 'relative' }}>
-                  {/* Continuous timeline line */}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: '80px',
-                      top: 0,
-                      bottom: 0,
-                      width: '2px',
-                      background: '#FF4444',
-                    }}
-                  />
-                  
+                <div style={{ 
+                  width: '100%',
+                  overflowX: 'auto',
+                  overflowY: 'hidden',
+                  padding: '1rem 0'
+                }}>
+                  {heatmapData.every(value => value === 0) ? (
+                    <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
+                      No activity data available for today.
+                    </Text>
+                  ) : (
+                    <>
+                      <div style={{ 
+                        position: 'relative',
+                        width: '100%',
+                        height: '600px',
+                        background: 'rgba(0, 0, 20, 0.3)',
+                        padding: '16px',
+                        borderRadius: '8px',
+                        marginBottom: '2rem',
+                        display: 'flex',
+                        flexDirection: 'column'
+                      }}>
+                        {/* Time labels */}
+                        {Array.from({ length: 12 }).map((_, i) => (
+                          <div
+                            key={i}
+                            style={{
+                              position: 'absolute',
+                              left: 0,
+                              top: `${(i * 100) / 12}%`,
+                              color: '#AAAAAA',
+                              fontSize: '0.8rem',
+                              transform: 'translateY(-50%)',
+                              padding: '0 8px'
+                            }}
+                          >
+                            {`${(i * 2).toString().padStart(2, '0')}:00`}
+                          </div>
+                        ))}
+
+                        {/* Horizontal grid lines */}
+                        {Array.from({ length: 12 }).map((_, i) => (
+                          <div
+                            key={i}
+                            style={{
+                              position: 'absolute',
+                              left: '40px',
+                              right: 0,
+                              top: `${(i * 100) / 12}%`,
+                              height: '1px',
+                              background: 'rgba(255, 255, 255, 0.1)'
+                            }}
+                          />
+                        ))}
+
+                        {/* Heatmap points */}
+                        <div style={{
+                          position: 'absolute',
+                          left: '40px',
+                          right: 0,
+                          top: 0,
+                          bottom: 0,
+                          padding: '16px'
+                        }}>
+                          {heatmapData.map((value, hour) => {
+                            if (value === 0) return null;
+                            const yPosition = (hour * 100) / 24;
+                            const intensity = value / maxUsage;
+                            const size = 20 + (intensity * 30); // Size varies with intensity
+                            const color = getHeatmapColor(value, maxUsage);
+                            
+                            return (
+                              <div
+                                key={hour}
+                                style={{
+                                  position: 'absolute',
+                                  left: '50%',
+                                  top: `${yPosition}%`,
+                                  width: `${size}px`,
+                                  height: `${size}px`,
+                                  transform: 'translate(-50%, -50%)',
+                                  background: color,
+                                  borderRadius: '50%',
+                                  filter: `blur(${10 + (intensity * 10)}px)`,
+                                  opacity: 0.8,
+                                }}
+                              />
+                            );
+                          })}
+                        </div>
+
+                        {/* Current time indicator */}
+                        <div style={{
+                          position: 'absolute',
+                          left: '40px',
+                          right: 0,
+                          top: `${(new Date().getHours() * 100) / 24}%`,
+                          width: '100%',
+                          height: '2px',
+                          background: 'rgba(255, 255, 255, 0.5)',
+                          zIndex: 2
+                        }} />
+                      </div>
+
+                      {/* Legend */}
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '24px',
+                        marginBottom: '2rem',
+                        flexWrap: 'wrap'
+                      }}>
+                        <div style={{ 
+                          display: 'flex', 
+                          alignItems: 'center',
+                          gap: '8px' 
+                        }}>
+                          <div style={{
+                            width: '16px',
+                            height: '16px',
+                            background: 'rgba(255, 255, 255, 0.4)',
+                            borderRadius: '50%',
+                            filter: 'blur(4px)'
+                          }} />
+                          <Text size="sm" style={{ color: '#AAAAAA' }}>
+                            Low ({`< ${Math.round(maxUsage / 3)}m`})
+                          </Text>
+                        </div>
+                        <div style={{ 
+                          display: 'flex', 
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}>
+                          <div style={{
+                            width: '16px',
+                            height: '16px',
+                            background: 'rgba(100, 255, 100, 0.6)',
+                            borderRadius: '50%',
+                            filter: 'blur(4px)'
+                          }} />
+                          <Text size="sm" style={{ color: '#AAAAAA' }}>
+                            Medium ({`${Math.round(maxUsage / 3)}m - ${Math.round(maxUsage * 2 / 3)}m`})
+                          </Text>
+                        </div>
+                        <div style={{ 
+                          display: 'flex', 
+                          alignItems: 'center',
+                          gap: '8px'
+                        }}>
+                          <div style={{
+                            width: '16px',
+                            height: '16px',
+                            background: 'rgba(255, 50, 50, 0.8)',
+                            borderRadius: '50%',
+                            filter: 'blur(4px)'
+                          }} />
+                          <Text size="sm" style={{ color: '#AAAAAA' }}>
+                            High ({`> ${Math.round(maxUsage * 2 / 3)}m`})
+                          </Text>
+                        </div>
+                      </div>
+
+                      {/* Summary */}
+                      <Paper
+                        style={{
+                          background: 'rgba(0, 0, 40, 0.3)',
+                          padding: '1.5rem',
+                          marginBottom: '1rem',
+                          borderRadius: '8px'
+                        }}
+                      >
+                        <Text style={{ color: '#FFFFFF', marginBottom: '0.5rem', fontSize: '1.1rem' }}>
+                          Peak Usage Time: {formatHour(heatmapData.indexOf(maxUsage))}
+                        </Text>
+                        <Text style={{ color: '#AAAAAA' }}>
+                          Most active hour with {Math.round(maxUsage)} minutes of screen time
+                        </Text>
+                      </Paper>
+                    </>
+                  )}
+                </div>
+              </div>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="timeline">
+              <Title
+                order={2}
+                style={{
+                  fontSize: '1.5rem',
+                  marginBottom: '0.5rem',
+                  color: '#00FFFF',
+                }}
+              >
+                Usage history
+              </Title>
+              <Text size="sm" style={{ color: '#AAAAAA', marginBottom: '2rem' }}>
+                Daily
+              </Text>
+
+              <div style={{ maxHeight: '600px', overflowY: 'auto', padding: '0 1rem' }}>
+                {sortedTimelineData.length === 0 ? (
+                  <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
+                    No activity history available for today.
+                  </Text>
+                ) : (
+                  <div style={{ position: 'relative' }}>
+                    {/* Date header */}
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center',
+                      marginBottom: '1.5rem',
+                      marginLeft: '80px'
+                    }}>
+                      <Text style={{ color: '#FFFFFF', fontWeight: 500 }}>
+                        {new Date().toLocaleDateString('en-US', { 
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric'
+                        })}
+                      </Text>
+                    </div>
+
+                    {/* Timeline entries */}
+                    <div style={{ position: 'relative' }}>
+                      {/* Continuous timeline line */}
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: '80px',
+                          top: 0,
+                          bottom: 0,
+                          width: '2px',
+                          background: '#FF4444',
+                        }}
+                      />
+                      
+                      {sortedTimelineData.map((app, index) => (
+                        <div
+                          key={index}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            marginBottom: '1.5rem',
+                            position: 'relative',
+                          }}
+                        >
+                          {/* Time */}
+                          <Text style={{ 
+                            width: '60px', 
+                            color: '#333333',
+                            fontSize: '0.9rem',
+                            marginRight: '20px',
+                            textAlign: 'right',
+                            fontWeight: 500
+                          }}>
+                            {formatTimelineTime(app.lastUsed)}
+                          </Text>
+                          
+                          {/* App icon container */}
+                          <div style={{
+                            position: 'relative',
+                            zIndex: 2,
+                            background: '#FFFFFF',
+                            borderRadius: '50%',
+                            padding: '2px',
+                            marginRight: '16px'
+                          }}>
+                            {app.icon ? (
+                              <img
+                                src={`data:image/png;base64,${app.icon}`}
+                                alt={app.name}
+                                style={{
+                                  width: '32px',
+                                  height: '32px',
+                                  borderRadius: '50%',
+                                  objectFit: 'cover'
+                                }}
+                              />
+                            ) : (
+                              <div style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '50%',
+                                background: app.color,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '16px',
+                                color: '#FFFFFF'
+                              }}>
+                                {app.name.charAt(0)}
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* App info */}
+                          <div style={{ flex: 1 }}>
+                            <Text style={{ 
+                              color: '#FFFFFF', 
+                              fontWeight: 500,
+                              marginBottom: '4px'
+                            }}>
+                              {app.name}
+                            </Text>
+                            <Text size="sm" style={{ color: '#AAAAAA' }}>
+                              {formatDetailedTime(app.time)}
+                            </Text>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Tabs.Panel>
+
+            <Tabs.Panel value="detailed">
+              <div style={{ padding: '1rem' }}>
+                {/* Date header with total time */}
+                <div style={{
+                  background: '#FFFFFF',
+                  padding: '1rem',
+                  borderRadius: '8px',
+                  marginBottom: '1rem'
+                }}>
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    color: '#6B46C1',
+                    fontSize: '1.25rem',
+                    fontWeight: 'bold'
+                  }}>
+                    <div>
+                      {new Date().toLocaleDateString('en-US', { 
+                        month: 'short',
+                        day: 'numeric'
+                      }).toUpperCase()}
+                    </div>
+                    <div>
+                      {formatDetailedTime(totalTodayScreenTime)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* App list */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+                  gap: '1rem'
+                }}>
                   {sortedTimelineData.map((app, index) => (
                     <div
                       key={index}
                       style={{
+                        background: '#FFFFFF',
+                        borderRadius: '8px',
+                        padding: '1rem',
                         display: 'flex',
-                        alignItems: 'center',
-                        marginBottom: '1.5rem',
-                        position: 'relative',
+                        flexDirection: 'column'
                       }}
                     >
-                      {/* Time */}
-                      <Text style={{ 
-                        width: '60px', 
-                        color: '#333333',
-                        fontSize: '0.9rem',
-                        marginRight: '20px',
-                        textAlign: 'right',
-                        fontWeight: 500
-                      }}>
-                        {formatTimelineTime(app.lastUsed)}
-                      </Text>
-                      
-                      {/* App icon container */}
+                      {/* App name */}
                       <div style={{
-                        position: 'relative',
-                        zIndex: 2,
-                        background: '#FFFFFF',
-                        borderRadius: '50%',
-                        padding: '2px',
-                        marginRight: '16px'
+                        fontSize: '1.1rem',
+                        fontWeight: 'bold',
+                        color: '#1A1A1A',
+                        marginBottom: '0.5rem'
                       }}>
-                        {app.icon ? (
-                          <img
-                            src={`data:image/png;base64,${app.icon}`}
-                            alt={app.name}
-                            style={{
-                              width: '32px',
-                              height: '32px',
-                              borderRadius: '50%',
-                              objectFit: 'cover'
-                            }}
-                          />
-                        ) : (
-                          <div style={{
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '50%',
-                            background: app.color,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '16px',
-                            color: '#FFFFFF'
-                          }}>
-                            {app.name.charAt(0)}
-                          </div>
-                        )}
+                        {app.name}
                       </div>
-                      
-                      {/* App info */}
-                      <div style={{ flex: 1 }}>
-                        <Text style={{ 
-                          color: '#FFFFFF', 
-                          fontWeight: 500,
-                          marginBottom: '4px'
+
+                      {/* App icon and stats */}
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '1rem'
+                      }}>
+                        {/* App icon */}
+                        <div style={{
+                          width: '48px',
+                          height: '48px',
+                          borderRadius: '12px',
+                          overflow: 'hidden',
+                          backgroundColor: app.color,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
                         }}>
-                          {app.name}
-                        </Text>
-                        <Text size="sm" style={{ color: '#AAAAAA' }}>
-                          {formatDetailedTime(app.time)}
-                        </Text>
+                          {app.icon ? (
+                            <img
+                              src={`data:image/png;base64,${app.icon}`}
+                              alt={app.name}
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover'
+                              }}
+                            />
+                          ) : (
+                            <div style={{
+                              color: '#FFFFFF',
+                              fontSize: '24px',
+                              fontWeight: 'bold'
+                            }}>
+                              {app.name.charAt(0)}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Usage stats */}
+                        <div style={{
+                          flex: 1,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.25rem'
+                        }}>
+                          {/* Time used */}
+                          <div style={{
+                            fontSize: '1.1rem',
+                            color: '#1A1A1A'
+                          }}>
+                            {formatDetailedTime(app.time)}
+                          </div>
+                          {/* Percentage */}
+                          <div style={{
+                            fontSize: '0.9rem',
+                            color: '#666666'
+                          }}>
+                            {Math.round((app.time / totalTodayScreenTime) * 100)}%
+                          </div>
+                        </div>
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
-            )}
-          </div>
-        </Tabs.Panel>
-
-        <Tabs.Panel value="heatmap">
-          <div style={{ 
-            maxWidth: '100%',
-            margin: '0 auto',
-            padding: '0 1rem'
-          }}>
-            <Title
-              order={2}
-              style={{
-                fontSize: '1.5rem',
-                marginBottom: '0.5rem',
-                color: '#00FFFF',
-              }}
-            >
-              Usage Heatmap
-            </Title>
-            <Text size="sm" style={{ color: '#AAAAAA', marginBottom: '1rem' }}>
-              Daily activity pattern
-            </Text>
-
-            {/* Total usage circle */}
-            <div style={{
-              display: 'flex',
-              justifyContent: 'center',
-              marginBottom: '2rem'
-            }}>
-              <div style={{
-                width: '120px',
-                height: '120px',
-                borderRadius: '50%',
-                background: '#6B46C1',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#FFFFFF',
-              }}>
-                <Text size="xl" fw={700}>
-                  {Math.floor(totalScreenTime / 60)}h
-                </Text>
-                <Text size="sm">
-                  {Math.round(totalScreenTime % 60)}m
-                </Text>
-              </div>
-            </div>
-
-            <div style={{ 
-              width: '100%',
-              overflowX: 'auto',
-              overflowY: 'hidden',
-              padding: '1rem 0'
-            }}>
-              {heatmapData.every(value => value === 0) ? (
-                <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
-                  No activity data available for today.
-                </Text>
-              ) : (
-                <>
-                  <div style={{ 
-                    position: 'relative',
-                    width: '100%',
-                    height: '600px',
-                    background: 'rgba(0, 0, 20, 0.3)',
-                    padding: '16px',
-                    borderRadius: '8px',
-                    marginBottom: '2rem',
-                    display: 'flex',
-                    flexDirection: 'column'
-                  }}>
-                    {/* Time labels */}
-                    {Array.from({ length: 12 }).map((_, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          position: 'absolute',
-                          left: 0,
-                          top: `${(i * 100) / 12}%`,
-                          color: '#AAAAAA',
-                          fontSize: '0.8rem',
-                          transform: 'translateY(-50%)',
-                          padding: '0 8px'
-                        }}
-                      >
-                        {`${(i * 2).toString().padStart(2, '0')}:00`}
-                      </div>
-                    ))}
-
-                    {/* Horizontal grid lines */}
-                    {Array.from({ length: 12 }).map((_, i) => (
-                      <div
-                        key={i}
-                        style={{
-                          position: 'absolute',
-                          left: '40px',
-                          right: 0,
-                          top: `${(i * 100) / 12}%`,
-                          height: '1px',
-                          background: 'rgba(255, 255, 255, 0.1)'
-                        }}
-                      />
-                    ))}
-
-                    {/* Heatmap points */}
-                    <div style={{
-                      position: 'absolute',
-                      left: '40px',
-                      right: 0,
-                      top: 0,
-                      bottom: 0,
-                      padding: '16px'
-                    }}>
-                      {heatmapData.map((value, hour) => {
-                        if (value === 0) return null;
-                        const yPosition = (hour * 100) / 24;
-                        const intensity = value / maxUsage;
-                        const size = 20 + (intensity * 30); // Size varies with intensity
-                        const color = getHeatmapColor(value, maxUsage);
-                        
-                        return (
-                          <div
-                            key={hour}
-                            style={{
-                              position: 'absolute',
-                              left: '50%',
-                              top: `${yPosition}%`,
-                              width: `${size}px`,
-                              height: `${size}px`,
-                              transform: 'translate(-50%, -50%)',
-                              background: color,
-                              borderRadius: '50%',
-                              filter: `blur(${10 + (intensity * 10)}px)`,
-                              opacity: 0.8,
-                            }}
-                          />
-                        );
-                      })}
-                    </div>
-
-                    {/* Current time indicator */}
-                    <div style={{
-                      position: 'absolute',
-                      left: '40px',
-                      right: 0,
-                      top: `${(new Date().getHours() * 100) / 24}%`,
-                      width: '100%',
-                      height: '2px',
-                      background: 'rgba(255, 255, 255, 0.5)',
-                      zIndex: 2
-                    }} />
-                  </div>
-
-                  {/* Legend */}
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '24px',
-                    marginBottom: '2rem',
-                    flexWrap: 'wrap'
-                  }}>
-                    <div style={{ 
-                      display: 'flex', 
-                      alignItems: 'center',
-                      gap: '8px' 
-                    }}>
-                      <div style={{
-                        width: '16px',
-                        height: '16px',
-                        background: 'rgba(255, 255, 255, 0.4)',
-                        borderRadius: '50%',
-                        filter: 'blur(4px)'
-                      }} />
-                      <Text size="sm" style={{ color: '#AAAAAA' }}>
-                        Low ({`< ${Math.round(maxUsage / 3)}m`})
-                      </Text>
-                    </div>
-                    <div style={{ 
-                      display: 'flex', 
-                      alignItems: 'center',
-                      gap: '8px'
-                    }}>
-                      <div style={{
-                        width: '16px',
-                        height: '16px',
-                        background: 'rgba(100, 255, 100, 0.6)',
-                        borderRadius: '50%',
-                        filter: 'blur(4px)'
-                      }} />
-                      <Text size="sm" style={{ color: '#AAAAAA' }}>
-                        Medium ({`${Math.round(maxUsage / 3)}m - ${Math.round(maxUsage * 2 / 3)}m`})
-                      </Text>
-                    </div>
-                    <div style={{ 
-                      display: 'flex', 
-                      alignItems: 'center',
-                      gap: '8px'
-                    }}>
-                      <div style={{
-                        width: '16px',
-                        height: '16px',
-                        background: 'rgba(255, 50, 50, 0.8)',
-                        borderRadius: '50%',
-                        filter: 'blur(4px)'
-                      }} />
-                      <Text size="sm" style={{ color: '#AAAAAA' }}>
-                        High ({`> ${Math.round(maxUsage * 2 / 3)}m`})
-                      </Text>
-                    </div>
-                  </div>
-
-                  {/* Summary */}
-                  <Paper
-                    style={{
-                      background: 'rgba(0, 0, 40, 0.3)',
-                      padding: '1.5rem',
-                      marginBottom: '1rem',
-                      borderRadius: '8px'
-                    }}
-                  >
-                    <Text style={{ color: '#FFFFFF', marginBottom: '0.5rem', fontSize: '1.1rem' }}>
-                      Peak Usage Time: {formatHour(heatmapData.indexOf(maxUsage))}
-                    </Text>
-                    <Text style={{ color: '#AAAAAA' }}>
-                      Most active hour with {Math.round(maxUsage)} minutes of screen time
-                    </Text>
-                  </Paper>
-                </>
-              )}
-            </div>
-          </div>
-        </Tabs.Panel>
-
-        <Tabs.Panel value="detailed">
-          <div style={{ padding: '1rem' }}>
-            {/* Date header with total time */}
-            <div style={{
-              background: '#FFFFFF',
-              padding: '1rem',
-              borderRadius: '8px',
-              marginBottom: '1rem'
-            }}>
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                color: '#6B46C1',
-                fontSize: '1.25rem',
-                fontWeight: 'bold'
-              }}>
-                <div>
-                  {new Date().toLocaleDateString('en-US', { 
-                    month: 'short',
-                    day: 'numeric'
-                  }).toUpperCase()}
-                </div>
-                <div>
-                  {formatDetailedTime(totalTodayScreenTime)}
-                </div>
-              </div>
-            </div>
-
-            {/* App list */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-              gap: '1rem'
-            }}>
-              {sortedTimelineData.map((app, index) => (
-                <div
-                  key={index}
-                  style={{
-                    background: '#FFFFFF',
-                    borderRadius: '8px',
-                    padding: '1rem',
-                    display: 'flex',
-                    flexDirection: 'column'
-                  }}
-                >
-                  {/* App name */}
-                  <div style={{
-                    fontSize: '1.1rem',
-                    fontWeight: 'bold',
-                    color: '#1A1A1A',
-                    marginBottom: '0.5rem'
-                  }}>
-                    {app.name}
-                  </div>
-
-                  {/* App icon and stats */}
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '1rem'
-                  }}>
-                    {/* App icon */}
-                    <div style={{
-                      width: '48px',
-                      height: '48px',
-                      borderRadius: '12px',
-                      overflow: 'hidden',
-                      backgroundColor: app.color,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}>
-                      {app.icon ? (
-                        <img
-                          src={`data:image/png;base64,${app.icon}`}
-                          alt={app.name}
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover'
-                          }}
-                        />
-                      ) : (
-                        <div style={{
-                          color: '#FFFFFF',
-                          fontSize: '24px',
-                          fontWeight: 'bold'
-                        }}>
-                          {app.name.charAt(0)}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Usage stats */}
-                    <div style={{
-                      flex: 1,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '0.25rem'
-                    }}>
-                      {/* Time used */}
-                      <div style={{
-                        fontSize: '1.1rem',
-                        color: '#1A1A1A'
-                      }}>
-                        {formatDetailedTime(app.time)}
-                      </div>
-                      {/* Percentage */}
-                      <div style={{
-                        fontSize: '0.9rem',
-                        color: '#666666'
-                      }}>
-                        {Math.round((app.time / totalTodayScreenTime) * 100)}%
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </Tabs.Panel>
+            </Tabs.Panel>
+          </>
+        )}
       </Tabs>
 
       {/* Daily Limit Progress Section */}
@@ -1090,6 +1120,21 @@ const Statistics = () => {
           </div>
         )}
       </div>
+
+      <style>
+        {`
+          @keyframes fadeIn {
+            from {
+              opacity: 0;
+              transform: translateY(-10px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+        `}
+      </style>
     </Container>
   );
 };
