@@ -1,4 +1,4 @@
-import { Container, Title, Text, Grid, Tabs, Paper } from '@mantine/core';
+import { Container, Title, Text, Grid, Tabs, Paper, Card } from '@mantine/core';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect } from 'react';
 
@@ -198,6 +198,7 @@ const DetailedAnalytics = () => {
           <Tabs.Tab value="heatmap">HEATMAP</Tabs.Tab>
           <Tabs.Tab value="timeline">TIMELINE</Tabs.Tab>
           <Tabs.Tab value="insights">INSIGHTS</Tabs.Tab>
+          <Tabs.Tab value="details">DETAILS</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="heatmap">
@@ -706,6 +707,96 @@ const DetailedAnalytics = () => {
               </Grid.Col>
             </Grid>
           </div>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="details">
+          <Title
+            order={2}
+            style={{
+              fontSize: '1.5rem',
+              marginBottom: '0.5rem',
+              color: '#00FFFF',
+            }}
+          >
+            Detailed App Usage
+          </Title>
+          <Text size="sm" style={{ color: '#AAAAAA', marginBottom: '2rem' }}>
+            Detailed breakdown of app usage
+          </Text>
+
+          <Grid>
+            {sortedTimelineData.length === 0 ? (
+              <Grid.Col>
+                <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
+                  No app usage data available for today.
+                </Text>
+              </Grid.Col>
+            ) : (
+              sortedTimelineData.map((app, index) => (
+                <Grid.Col key={index} span={6}>
+                  <Card
+                    style={{
+                      background: 'rgba(0, 0, 32, 0.3)',
+                      border: '1px solid rgba(255, 0, 255, 0.1)',
+                      borderRadius: '8px',
+                      padding: '1rem',
+                      height: '100%',
+                      transition: 'all 0.3s ease',
+                      '&:hover': {
+                        borderColor: 'rgba(255, 0, 255, 0.3)',
+                        transform: 'translateY(-2px)',
+                      }
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                      {app.icon ? (
+                        <img
+                          src={`data:image/png;base64,${app.icon}`}
+                          alt={app.name}
+                          style={{
+                            width: '48px',
+                            height: '48px',
+                            borderRadius: '12px'
+                          }}
+                        />
+                      ) : (
+                        <div style={{
+                          width: '48px',
+                          height: '48px',
+                          borderRadius: '12px',
+                          backgroundColor: app.color || '#FF00FF',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '24px',
+                          color: '#FFFFFF'
+                        }}>
+                          {app.name.charAt(0)}
+                        </div>
+                      )}
+                      <div>
+                        <Text style={{ color: '#FFFFFF', fontSize: '1.1rem', fontWeight: 500 }}>
+                          {app.name}
+                        </Text>
+                        <Text size="sm" style={{ color: '#AAAAAA' }}>
+                          Last used: {formatTimelineTime(app.lastUsed)}
+                        </Text>
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: 'auto' }}>
+                      <Text style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
+                        {formatDetailedTime(app.time)}
+                      </Text>
+                      <Text size="sm" style={{ color: '#AAAAAA' }}>
+                        {Math.round((app.time / totalScreenTime) * 100)}% of total screen time
+                      </Text>
+                    </div>
+                  </Card>
+                </Grid.Col>
+              ))
+            )}
+          </Grid>
         </Tabs.Panel>
       </Tabs>
 
