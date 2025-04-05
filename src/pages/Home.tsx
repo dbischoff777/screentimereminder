@@ -298,8 +298,7 @@ const Home = () => {
       <Box
         style={{
           textAlign: 'center',
-          padding: '1rem',
-          marginTop: '2rem',
+          padding: '2rem',
         }}
       >
         <Text
@@ -312,8 +311,6 @@ const Home = () => {
           {appVersion}
         </Text>
       </Box>
-
-      
     </Container>
   );
 };

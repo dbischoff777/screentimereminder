@@ -115,7 +115,6 @@ const Statistics = () => {
   // Get filtered and sorted apps for breakdown and distribution sections
   const getFilteredApps = () => {
     const totalTime = totalTodayScreenTime;
-
     return sortedTimelineData
       .filter(app => {
         if (!app.time || app.time <= 0) return false;
@@ -127,15 +126,13 @@ const Statistics = () => {
 
   const sortedApps = getFilteredApps();
 
-  // Category colors for visualization
-  const categoryColors = {
-    'Social Media': '#FF1493',    // Deep Pink
-    'Entertainment': '#FFD700',   // Gold
-    'Productivity': '#00FF00',    // Lime Green
-    'Games': '#00FFFF',          // Cyan
-    'Education': '#4169E1',      // Royal Blue
-    'Communication': '#9932CC',   // Dark Orchid
-    'Other': '#FF4500'           // Orange Red
+  // Get color based on usage percentage
+  const getAppColor = (time: number, totalTime: number) => {
+    if (!totalTime) return '#00FFFF';
+    const percentage = (time / totalTime) * 100;
+    if (percentage >= 30) return '#FF1493'; // Deep Pink - Heavy usage
+    if (percentage >= 15) return '#FFD700'; // Gold - Moderate usage
+    return '#00FFFF';                       // Cyan - Light usage
   };
 
   // Format time (minutes) to hours and minutes
@@ -287,126 +284,97 @@ const Statistics = () => {
             No app usage data recorded yet. Usage data will appear here as you use your device.
           </Text>
         ) : (
-          <div style={{ height: 300 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={sortedApps}
-                margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                <XAxis 
-                  dataKey="name" 
-                  stroke="#00FFFF"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={false}
-                />
-                <YAxis stroke="#00FFFF" label={{ value: 'Minutes', angle: -90, position: 'insideLeft', fill: '#00FFFF' }} />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: 'rgba(0, 0, 32, 0.9)', 
-                    border: '1px solid #FF00FF',
-                    color: '#00FFFF'
-                  }}
-                  formatter={(value: number, _: any, props: any) => {
-                    return [`${formatTime(value)}`, props.payload.name];
-                  }}
-                />
-                <Bar 
-                  dataKey="time" 
-                  fill="#FF00FF"
-                  shape={(props: any) => {
-                    const { x, y, width, height, payload } = props;
-                    const color = payload.color || categoryColors[payload.category as keyof typeof categoryColors] || categoryColors.Other;
-                    return (
-                      <g>
-                        <defs>
-                          <linearGradient id={`gradient-${payload.name}`} x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor={color} stopOpacity={1} />
-                            <stop offset="100%" stopColor={color} stopOpacity={0.6} />
-                          </linearGradient>
-                        </defs>
-                        {/* Main bar */}
-                        <rect
-                          x={x}
-                          y={y}
-                          width={width}
-                          height={height}
-                          fill={`url(#gradient-${payload.name})`}
-                          style={{
-                            filter: `drop-shadow(0 0 4px ${color})`
-                          }}
-                        />
-                        {/* Icon at the top of the bar */}
-                        {payload.icon && (
-                          <g>
-                            <circle
-                              cx={x + width / 2}
-                              cy={y - 20}
-                              r={16}
-                              fill="#FFFFFF"
-                              style={{
-                                filter: `drop-shadow(0 0 2px ${color})`
-                              }}
-                            />
-                            <image
-                              xlinkHref={`data:image/png;base64,${payload.icon}`}
-                              x={x + width / 2 - 16}
-                              y={y - 36}
-                              width={32}
-                              height={32}
-                              style={{
-                                filter: 'brightness(1.2)'
-                              }}
-                            />
-                          </g>
-                        )}
-                      </g>
-                    );
-                  }}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </div>
+          <>
+            <div style={{ height: 300 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={sortedApps}
+                  margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                  <XAxis 
+                    dataKey="name" 
+                    stroke="#00FFFF"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={false}
+                  />
+                  <YAxis stroke="#00FFFF" label={{ value: 'Minutes', angle: -90, position: 'insideLeft', fill: '#00FFFF' }} />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: 'rgba(0, 0, 32, 0.9)', 
+                      border: '1px solid #FF00FF',
+                      color: '#00FFFF'
+                    }}
+                    formatter={(value: number, _: any, props: any) => {
+                      return [`${formatTime(value)}`, props.payload.name];
+                    }}
+                  />
+                  <Bar 
+                    dataKey="time" 
+                    fill="#FF00FF"
+                    shape={(props: any) => {
+                      const { x, y, width, height, payload } = props;
+                      const color = getAppColor(payload.time, totalTodayScreenTime);
+                      return (
+                        <g>
+                          <defs>
+                            <filter id={`glow-${payload.name}`}>
+                              <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+                              <feMerge>
+                                <feMergeNode in="coloredBlur"/>
+                                <feMergeNode in="SourceGraphic"/>
+                              </feMerge>
+                            </filter>
+                          </defs>
+                          {/* Main bar */}
+                          <rect
+                            x={x}
+                            y={y}
+                            width={width}
+                            height={height}
+                            fill={color}
+                            style={{
+                              filter: `url(#glow-${payload.name})`
+                            }}
+                          />
+                          {/* App icon */}
+                          {payload.icon && (
+                            <g>
+                              <circle
+                                cx={x + width / 2}
+                                cy={y - 20}
+                                r={16}
+                                fill="#FFFFFF"
+                              />
+                              <image
+                                xlinkHref={`data:image/png;base64,${payload.icon}`}
+                                x={x + width / 2 - 16}
+                                y={y - 36}
+                                width={32}
+                                height={32}
+                              />
+                            </g>
+                          )}
+                        </g>
+                      );
+                    }}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
 
-      {/* App Distribution Section */}
-      <div
-        style={{
-          padding: '1.5rem',
-          background: 'transparent',
-          borderTop: '1px solid #FF00FF',
-          borderBottom: '1px solid #FF00FF',
-          marginBottom: '1.5rem',
-        }}
-      >
-        <Grid>
-          <Grid.Col span={6}>
-            <Title
-              order={3}
-              style={{
-                color: '#FF00FF',
-                marginBottom: '1rem',
-                textShadow: '0 0 5px #FF00FF',
-              }}
-            >
-              App Distribution
-            </Title>
-
-            {totalTodayScreenTime === 0 ? (
-              <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
-                No usage data available yet
-              </Text>
-            ) : (
-              <div style={{ marginTop: '1rem' }}>
-                {sortedApps.map((app, index) => (
+            {/* App Distribution Section */}
+            <div style={{ marginTop: '1rem' }}>
+              {sortedApps.map((app, index) => {
+                const color = getAppColor(app.time, totalTodayScreenTime);
+                return (
                   <div key={index} style={{ display: 'flex', alignItems: 'center', marginBottom: '0.75rem' }}>
                     <div
                       style={{
                         width: '12px',
                         height: '12px',
-                        backgroundColor: app.color || categoryColors[app.category as keyof typeof categoryColors] || categoryColors.Other,
+                        backgroundColor: color,
                         marginRight: '8px',
                         borderRadius: '2px',
                       }}
@@ -415,7 +383,7 @@ const Statistics = () => {
                       {app.name}
                     </Text>
                     <Text style={{ 
-                      color: app.color || categoryColors[app.category as keyof typeof categoryColors] || categoryColors.Other, 
+                      color: color,
                       fontWeight: 700, 
                       marginLeft: '8px' 
                     }}>
@@ -425,30 +393,35 @@ const Statistics = () => {
                       {Math.round((app.time / totalTodayScreenTime) * 100)}%
                     </Text>
                   </div>
-                ))}
+                );
+              })}
+            </div>
+
+            {/* Color Legend */}
+            <div style={{ 
+              marginTop: '2rem',
+              display: 'flex',
+              justifyContent: 'center',
+              gap: '2rem',
+              padding: '1rem',
+              background: 'rgba(0, 0, 32, 0.3)',
+              borderRadius: '8px'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ width: '12px', height: '12px', backgroundColor: '#FF1493', borderRadius: '2px' }} />
+                <Text size="sm" style={{ color: '#AAAAAA' }}>Heavy Usage (≥30%)</Text>
               </div>
-            )}
-          </Grid.Col>
-          
-          <Grid.Col span={6} style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            {totalTodayScreenTime > 0 && (
-              <RingProgress
-                size={150}
-                thickness={12}
-                roundCaps
-                sections={sortedApps.map(app => ({
-                  value: (app.time / totalTodayScreenTime) * 100,
-                  color: app.color,
-                }))}
-                label={
-                  <Text size="lg" style={{ color: '#FF00FF', textAlign: 'center' }}>
-                    {formatTime(totalTodayScreenTime)}
-                  </Text>
-                }
-              />
-            )}
-          </Grid.Col>
-        </Grid>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ width: '12px', height: '12px', backgroundColor: '#FFD700', borderRadius: '2px' }} />
+                <Text size="sm" style={{ color: '#AAAAAA' }}>Moderate Usage (≥15%)</Text>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <div style={{ width: '12px', height: '12px', backgroundColor: '#00FFFF', borderRadius: '2px' }} />
+                <Text size="sm" style={{ color: '#AAAAAA' }}>Light Usage (&lt;15%)</Text>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </Container>
   );
