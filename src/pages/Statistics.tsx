@@ -127,6 +127,17 @@ const Statistics = () => {
 
   const sortedApps = getFilteredApps();
 
+  // Category colors for visualization
+  const categoryColors = {
+    'Social Media': '#FF1493',    // Deep Pink
+    'Entertainment': '#FFD700',   // Gold
+    'Productivity': '#00FF00',    // Lime Green
+    'Games': '#00FFFF',          // Cyan
+    'Education': '#4169E1',      // Royal Blue
+    'Communication': '#9932CC',   // Dark Orchid
+    'Other': '#FF4500'           // Orange Red
+  };
+
   // Format time (minutes) to hours and minutes
   const formatTime = (minutes: number) => {
     const hours = Math.floor(minutes / 60);
@@ -283,7 +294,13 @@ const Statistics = () => {
                 margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                <XAxis dataKey="name" stroke="#00FFFF" hide={true} />
+                <XAxis 
+                  dataKey="name" 
+                  stroke="#00FFFF"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={false}
+                />
                 <YAxis stroke="#00FFFF" label={{ value: 'Minutes', angle: -90, position: 'insideLeft', fill: '#00FFFF' }} />
                 <Tooltip 
                   contentStyle={{ 
@@ -295,7 +312,59 @@ const Statistics = () => {
                     return [`${formatTime(value)}`, props.payload.name];
                   }}
                 />
-                <Bar dataKey="time" fill="#FF00FF" />
+                <Bar 
+                  dataKey="time" 
+                  fill="#FF00FF"
+                  shape={(props: any) => {
+                    const { x, y, width, height, payload } = props;
+                    const color = payload.color || categoryColors[payload.category as keyof typeof categoryColors] || categoryColors.Other;
+                    return (
+                      <g>
+                        <defs>
+                          <linearGradient id={`gradient-${payload.name}`} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={color} stopOpacity={1} />
+                            <stop offset="100%" stopColor={color} stopOpacity={0.6} />
+                          </linearGradient>
+                        </defs>
+                        {/* Main bar */}
+                        <rect
+                          x={x}
+                          y={y}
+                          width={width}
+                          height={height}
+                          fill={`url(#gradient-${payload.name})`}
+                          style={{
+                            filter: `drop-shadow(0 0 4px ${color})`
+                          }}
+                        />
+                        {/* Icon at the top of the bar */}
+                        {payload.icon && (
+                          <g>
+                            <circle
+                              cx={x + width / 2}
+                              cy={y - 20}
+                              r={16}
+                              fill="#FFFFFF"
+                              style={{
+                                filter: `drop-shadow(0 0 2px ${color})`
+                              }}
+                            />
+                            <image
+                              xlinkHref={`data:image/png;base64,${payload.icon}`}
+                              x={x + width / 2 - 16}
+                              y={y - 36}
+                              width={32}
+                              height={32}
+                              style={{
+                                filter: 'brightness(1.2)'
+                              }}
+                            />
+                          </g>
+                        )}
+                      </g>
+                    );
+                  }}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -337,7 +406,7 @@ const Statistics = () => {
                       style={{
                         width: '12px',
                         height: '12px',
-                        backgroundColor: app.color,
+                        backgroundColor: app.color || categoryColors[app.category as keyof typeof categoryColors] || categoryColors.Other,
                         marginRight: '8px',
                         borderRadius: '2px',
                       }}
@@ -345,7 +414,11 @@ const Statistics = () => {
                     <Text style={{ color: '#f0f0f0', flex: 1 }}>
                       {app.name}
                     </Text>
-                    <Text style={{ color: app.color, fontWeight: 700, marginLeft: '8px' }}>
+                    <Text style={{ 
+                      color: app.color || categoryColors[app.category as keyof typeof categoryColors] || categoryColors.Other, 
+                      fontWeight: 700, 
+                      marginLeft: '8px' 
+                    }}>
                       {formatTime(app.time)}
                     </Text>
                     <Text size="sm" style={{ color: '#AAAAAA', width: '50px', textAlign: 'right' }}>

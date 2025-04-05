@@ -138,12 +138,13 @@ const DetailedAnalytics = () => {
 
   // Category colors for visualization
   const categoryColors = {
-    'Social Media': '#FF00FF',
-    'Entertainment': '#FF5733',
-    'Productivity': '#33FF57',
-    'Games': '#00FFFF',
-    'Education': '#3357FF',
-    'Other': '#A833FF'
+    'Social Media': '#FF1493',    // Deep Pink
+    'Entertainment': '#FFD700',   // Gold
+    'Productivity': '#00FF00',    // Lime Green
+    'Games': '#00FFFF',          // Cyan
+    'Education': '#4169E1',      // Royal Blue
+    'Communication': '#9932CC',   // Dark Orchid
+    'Other': '#FF4500'           // Orange Red
   };
 
   // Calculate productivity score based on app categories
