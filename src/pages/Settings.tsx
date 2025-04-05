@@ -1,9 +1,10 @@
-import { Container, Title, NumberInput, Button, Text, Switch, Group, Loader } from '@mantine/core';
+import { Container, Title, Button, Text, Switch, Group, Loader } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect } from 'react';
 import AppUsageTracker from '../services/AppUsageTracker';
 import { FiAlertCircle, FiCheckCircle, FiBarChart2 } from 'react-icons/fi';
+import CustomDropdown from '../components/CustomDropdown';
 
 // Add type declaration for Capacitor on window object if not already defined
 declare global {
@@ -151,14 +152,6 @@ const Settings = () => {
     navigate('/');
   };
 
-  // Frequency options
-  const frequencyOptions = [
-    { value: '5', label: '5m' },
-    { value: '15', label: '15m' },
-    { value: '30', label: '30m' },
-    { value: '60', label: '60m' }
-  ];
-
   return (
     <Container 
       size="md" 
@@ -201,38 +194,21 @@ const Settings = () => {
         >
           Screen Time Configuration
         </Title>
-
-        <Text style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
-          Daily Screen Time Limit (minutes)
-        </Text>
-        <NumberInput
+        <CustomDropdown
+          options={[
+            { value: '30', label: '30m' },
+            { value: '60', label: '1h' },
+            { value: '120', label: '2h' },
+            { value: '180', label: '3h' },
+            { value: '240', label: '4h' },
+            { value: '300', label: '5h' },
+            { value: '360', label: '6h' },
+            { value: '420', label: '7h' },
+            { value: '480', label: '8h' }
+          ]}
           value={screenTimeLimit}
-          onChange={(val) => {
-            console.log('Screen time limit changed from:', screenTimeLimit, 'to:', val);
-            setScreenTimeLimit(Number(val) || 0);
-          }}
-          min={5}
-          max={1440}
-          step={5}
-          style={{ marginBottom: '2rem' }}
-          styles={{
-            input: {
-              backgroundColor: 'rgba(0, 0, 40, 0.3)',
-              color: '#FFFFFF',
-              borderColor: '#FF00FF',
-              '&:focus': {
-                borderColor: '#00FFFF',
-              }
-            },
-            control: {
-              backgroundColor: 'rgba(0, 0, 40, 0.5)',
-              borderColor: '#FF00FF',
-              color: '#FFFFFF',
-              '&:hover': {
-                backgroundColor: 'rgba(255, 0, 255, 0.2)',
-              }
-            }
-          }}
+          onChange={setScreenTimeLimit}
+          label="Daily Screen Time Limit"
         />
 
         <Group style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between' }}>
@@ -243,7 +219,6 @@ const Settings = () => {
             checked={notificationsEnabled}
             onChange={(event) => {
               setNotificationsEnabled(event.currentTarget.checked);
-              // Remove immediate navigation - let the Save Settings button handle this
             }}
             color="cyan"
             styles={{
@@ -354,36 +329,17 @@ const Settings = () => {
         </div>
 
         {notificationsEnabled && (
-          <>
-            <Text style={{ color: '#00FFFF', marginBottom: '1rem' }}>
-              Notification Frequency (minutes before limit)
-            </Text>
-            
-            <div style={{ marginBottom: '2rem' }}>
-              <Group style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
-                {frequencyOptions.map((option) => (
-                  <Button
-                    key={option.value}
-                    variant={notificationFrequency === parseInt(option.value) ? "filled" : "outline"}
-                    onClick={() => setNotificationFrequency(parseInt(option.value))}
-                    style={{
-                      flex: 1,
-                      backgroundColor: notificationFrequency === parseInt(option.value) 
-                        ? '#FF00FF' 
-                        : 'transparent',
-                      borderColor: '#FF00FF',
-                      color: notificationFrequency === parseInt(option.value) 
-                        ? '#000020' 
-                        : '#00FFFF',
-                      fontWeight: 'bold',
-                    }}
-                  >
-                    {option.label}
-                  </Button>
-                ))}
-              </Group>
-            </div>
-          </>
+          <CustomDropdown
+            options={[
+              { value: '5', label: '5m' },
+              { value: '15', label: '15m' },
+              { value: '30', label: '30m' },
+              { value: '60', label: '60m' }
+            ]}
+            value={notificationFrequency}
+            onChange={setNotificationFrequency}
+            label="Notification Frequency"
+          />
         )}
 
         <Button
