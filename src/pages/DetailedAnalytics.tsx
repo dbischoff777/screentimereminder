@@ -2,6 +2,9 @@ import { Container, Title, Text, Grid, Tabs, Paper, Card, Badge, Stack, Group } 
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect } from 'react';
 import FocusTimer from '../components/FocusTimer';
+import { EmailReportSettings, EmailSettings } from '../components/EmailReportSettings';
+import { ReportScheduler } from '../services/reportScheduler';
+import { notifications } from '@mantine/notifications';
 
 const DetailedAnalytics = () => {
   const { 
@@ -44,6 +47,13 @@ const DetailedAnalytics = () => {
   };
 
   const sortedTimelineData = getCurrentDayData();
+
+  // Get most used app sorted by time
+  const getMostUsedApp = () => {
+    return [...sortedTimelineData].sort((a, b) => b.time - a.time)[0];
+  };
+
+  const mostUsedApp = getMostUsedApp();
 
   // Format time for display
   const formatDetailedTime = (minutes: number) => {
@@ -258,6 +268,39 @@ const DetailedAnalytics = () => {
     };
   }, []);
 
+  // Handle email settings
+  const handleEmailSettingsSave = async (settings: EmailSettings) => {
+    try {
+      const scheduler = ReportScheduler.getInstance();
+      const totalScreenTime = getTotalScreenTime();
+      const productivityScore = calculateProductivityScore();
+
+      await scheduler.updateSchedule(
+        settings,
+        appUsageData,
+        totalScreenTime,
+        productivityScore
+      );
+      
+      const scheduleInfo = scheduler.getScheduleInfo(settings.email);
+      if (scheduleInfo.isEnabled && scheduleInfo.nextReport) {
+        notifications.show({
+          title: 'Success',
+          message: `Next report scheduled for ${scheduleInfo.nextReport.toLocaleString()}`,
+          color: 'teal'
+        });
+      }
+    } catch (error) {
+      console.error('Failed to schedule report:', error);
+      notifications.show({
+        title: 'Error',
+        message: error instanceof Error ? error.message : 'Failed to schedule report. Please try again.',
+        color: 'red'
+      });
+      throw error; // Propagate the error to the EmailReportSettings component
+    }
+  };
+
   return (
     <Container 
       size="md" 
@@ -359,6 +402,7 @@ const DetailedAnalytics = () => {
           <Tabs.Tab value="insights">INSIGHTS</Tabs.Tab>
           <Tabs.Tab value="details">DETAILS</Tabs.Tab>
           <Tabs.Tab value="focus">FOCUS</Tabs.Tab>
+          <Tabs.Tab value="settings">REPORT</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="heatmap" data-active-tab="heatmap">
@@ -818,13 +862,13 @@ const DetailedAnalytics = () => {
                   <Text size="lg" fw={700} style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
                     Most Used App
                   </Text>
-                  {sortedTimelineData[0] ? (
+                  {mostUsedApp ? (
                     <>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-                        {sortedTimelineData[0].icon ? (
+                        {mostUsedApp.icon ? (
                           <img
-                            src={`data:image/png;base64,${sortedTimelineData[0].icon}`}
-                            alt={sortedTimelineData[0].name}
+                            src={`data:image/png;base64,${mostUsedApp.icon}`}
+                            alt={mostUsedApp.name}
                             style={{
                               width: '32px',
                               height: '32px',
@@ -836,19 +880,19 @@ const DetailedAnalytics = () => {
                             width: '32px',
                             height: '32px',
                             borderRadius: '8px',
-                            backgroundColor: sortedTimelineData[0].color,
+                            backgroundColor: mostUsedApp.color,
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             color: '#FFFFFF'
                           }}>
-                            {sortedTimelineData[0].name.charAt(0)}
+                            {mostUsedApp.name.charAt(0)}
                           </div>
                         )}
-                        <Text style={{ color: '#FFFFFF' }}>{sortedTimelineData[0].name}</Text>
+                        <Text style={{ color: '#FFFFFF' }}>{mostUsedApp.name}</Text>
                       </div>
                       <Text size="sm" style={{ color: '#AAAAAA' }}>
-                        {formatDetailedTime(sortedTimelineData[0].time)} ({Math.round((sortedTimelineData[0].time / totalScreenTime) * 100)}% of total)
+                        {formatDetailedTime(mostUsedApp.time)} ({Math.round((mostUsedApp.time / totalScreenTime) * 100)}% of total)
                       </Text>
                     </>
                   ) : (
@@ -1101,6 +1145,27 @@ const DetailedAnalytics = () => {
                 </Stack>
               </Paper>
             )}
+          </div>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="settings" data-active-tab="settings">
+          <div style={{ maxWidth: '600px', margin: '0 auto', paddingBottom: '80px' }}>
+            <Title
+              order={2}
+              style={{
+                fontSize: '1.5rem',
+                marginBottom: '1.5rem',
+                color: '#00FFFF',
+              }}
+            >
+              Report Settings
+            </Title>
+            
+            <EmailReportSettings onSave={handleEmailSettingsSave} />
+            
+            <Text size="sm" style={{ color: '#AAAAAA', marginTop: '1rem' }}>
+              Configure your screen time report delivery preferences. Reports include detailed analytics about your app usage and productivity metrics.
+            </Text>
           </div>
         </Tabs.Panel>
       </Tabs>
