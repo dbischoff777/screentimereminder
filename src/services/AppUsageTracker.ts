@@ -33,8 +33,17 @@ export interface AppUsageTrackerPlugin {
   checkScreenTimeLimit(params: {
     totalTime: number;
     limit: number;
-    remainingMinutes: number;
-  }): Promise<{ value: boolean }>;
+    notificationFrequency: number;
+  }): Promise<void>;
+  getSharedPreferences(): Promise<{
+    lastLimitReachedNotification: number;
+    lastApproachingLimitNotification: number;
+    screenTimeLimit: number;
+    notificationFrequency: number;
+    totalScreenTime: number;
+  }>;
+  setScreenTimeLimit(params: { limit: number }): Promise<void>;
+  setNotificationFrequency(params: { frequency: number }): Promise<void>;
 }
 
 // Register the AppUsageTracker plugin
@@ -457,13 +466,60 @@ export default class AppUsageTrackerService {
   public async checkScreenTimeLimit(params: {
     totalTime: number;
     limit: number;
-    remainingMinutes: number;
-  }): Promise<boolean> {
+    notificationFrequency: number;
+  }): Promise<void> {
     try {
-      const result = await this.plugin.checkScreenTimeLimit(params);
-      return result.value;
+      await this.plugin.checkScreenTimeLimit(params);
     } catch (error) {
       console.error('Error checking screen time limit:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get shared preferences from the native layer
+   */
+  public async getSharedPreferences(): Promise<{
+    lastLimitReachedNotification: number;
+    lastApproachingLimitNotification: number;
+    screenTimeLimit: number;
+    notificationFrequency: number;
+    totalScreenTime: number;
+  }> {
+    try {
+      console.log('AppUsageTracker: Getting shared preferences');
+      const result = await this.plugin.getSharedPreferences();
+      console.log('AppUsageTracker: Shared preferences result:', result);
+      return result;
+    } catch (error) {
+      console.error('Error getting shared preferences:', error);
+      // Return default values if there's an error
+      return {
+        lastLimitReachedNotification: 0,
+        lastApproachingLimitNotification: 0,
+        screenTimeLimit: 120, // Default 2 hours
+        notificationFrequency: 15, // Default 15 minutes
+        totalScreenTime: 0
+      };
+    }
+  }
+
+  public async setScreenTimeLimit(limit: number): Promise<void> {
+    try {
+      console.log('Setting screen time limit in native:', limit);
+      await this.plugin.setScreenTimeLimit({ limit });
+    } catch (error) {
+      console.error('Error setting screen time limit:', error);
+      throw error;
+    }
+  }
+
+  public async setNotificationFrequency(frequency: number): Promise<void> {
+    try {
+      console.log('Setting notification frequency in native:', frequency);
+      await this.plugin.setNotificationFrequency({ frequency });
+    } catch (error) {
+      console.error('Error setting notification frequency:', error);
       throw error;
     }
   }

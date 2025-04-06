@@ -16,6 +16,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
 
     <application
         android:allowBackup="true"
@@ -23,7 +24,8 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/AppTheme">
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="true">
 
         <!-- Main Activity -->
         <activity
@@ -32,7 +34,8 @@
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
-            android:exported="true">
+            android:exported="true"
+            android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -41,29 +44,20 @@
 
         <!-- Our custom background service -->
         <service
-            android:name=".AppUsageService"
+            android:name=".BackgroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="specialUse"
-            android:stopWithTask="false">
-            <intent-filter>
-                <action android:name="START_TRACKING" />
-                <action android:name="GET_USAGE_DATA" />
-            </intent-filter>
-            <!-- Declare special use for the foreground service -->
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Usage tracking service for screen time monitoring" />
-        </service>
+            android:foregroundServiceType="dataSync" />
 
         <!-- Boot receiver for starting our service on device boot -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
-            android:exported="false">
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.REBOOT" />
             </intent-filter>
         </receiver>
 

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AppUsageTrackerService, { AppUsage as TrackerAppUsage } from '../services/AppUsageTracker';
-import { App } from '@capacitor/app';
+import BackgroundUpdateService from '../services/BackgroundUpdateService';
 
 // Add type declaration for Capacitor on window object
 declare global {
@@ -98,21 +98,33 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
   const [activeApp, setActiveApp] = useState<string | null>(null);
   const [trackingStartTime, setTrackingStartTime] = useState<number | null>(null);
   
+  // Check screen time limit
+  const checkLimit = async () => {
+    try {
+      const appUsageTracker = AppUsageTrackerService.getInstance();
+      await appUsageTracker.checkScreenTimeLimit({
+        totalTime: getTotalScreenTime(),
+        limit: screenTimeLimit,
+        notificationFrequency: notificationFrequency
+      });
+    } catch (error) {
+      console.error('Error checking screen time limit:', error);
+    }
+  };
+
   // Save settings to localStorage whenever they change
   useEffect(() => {
     console.log('Screen time limit changed in context:', screenTimeLimit);
     localStorage.setItem('screenTimeLimit', screenTimeLimit.toString());
     
-    // Force a screen time check when limit changes
-    const checkLimit = async () => {
-      try {
-        console.log('Forcing screen time check with new limit:', screenTimeLimit);
-        await checkScreenTimeLimit();
-      } catch (error) {
-        console.error('Error checking screen time limit after limit update:', error);
-      }
-    };
+    // Sync with native code
+    const appUsageTracker = AppUsageTrackerService.getInstance();
+    appUsageTracker.setScreenTimeLimit(screenTimeLimit)
+      .catch(error => {
+        console.error('Error syncing screen time limit with native code:', error);
+      });
     
+    // Force a screen time check with the new limit
     checkLimit();
   }, [screenTimeLimit]);
 
@@ -121,7 +133,15 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
   }, [notificationsEnabled]);
 
   useEffect(() => {
+    console.log('Notification frequency changed in context:', notificationFrequency);
     localStorage.setItem('notificationFrequency', notificationFrequency.toString());
+    
+    // Sync with native code
+    const appUsageTracker = AppUsageTrackerService.getInstance();
+    appUsageTracker.setNotificationFrequency(notificationFrequency)
+      .catch(error => {
+        console.error('Error syncing notification frequency with native code:', error);
+      });
   }, [notificationFrequency]);
 
   useEffect(() => {
@@ -342,107 +362,25 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
   }, [activeApp, trackingStartTime]);
 
   useEffect(() => {
-    let backgroundTrackingInterval: NodeJS.Timeout | null = null;
-    let isTracking = false;
-
-    const startBackgroundTracking = async () => {
-      if (isTracking) {
-        console.log('Background tracking already running');
-        return;
+    // Initialize background update service
+    const backgroundService = BackgroundUpdateService.getInstance();
+    backgroundService.setUpdateCallback(async () => {
+      const success = await updateAppUsageData();
+      if (success) {
+        const totalTime = getTotalScreenTime();
+        console.log('Background update - Total screen time:', {
+          minutes: totalTime,
+          hours: (totalTime / 60).toFixed(2),
+          timestamp: new Date().toISOString()
+        });
       }
-      
-      console.log('Starting background tracking');
-      isTracking = true;
+    });
 
-      // Run immediately on start
-      console.log('Running initial background check');
-      try {
-        await updateAppUsageData();
-        await checkScreenTimeLimit();
-      } catch (error) {
-        console.error('Error in initial background check:', error);
-      }
+    // Initial data load
+    updateAppUsageData();
 
-      // Set up a more reliable interval for background updates (30 seconds)
-      backgroundTrackingInterval = setInterval(async () => {
-        try {
-          console.log('Background tracking interval triggered');
-          
-          // Check if we have permission and notifications are enabled
-          const appUsageTracker = AppUsageTrackerService.getInstance();
-          const hasPermission = await appUsageTracker.hasUsagePermission();
-          
-          if (!hasPermission) {
-            console.log('No usage permission, skipping background update');
-            return;
-          }
-          
-          // Update app usage data
-          const updateSuccess = await updateAppUsageData();
-          console.log('Background updateAppUsageData result:', updateSuccess);
-          
-          if (updateSuccess) {
-            // Check screen time limit
-            await checkScreenTimeLimit();
-            console.log('Background checkScreenTimeLimit completed');
-            
-            // Force a UI update by updating localStorage
-            const totalTime = getTotalScreenTime();
-            const remainingTime = screenTimeLimit - totalTime;
-            localStorage.setItem('lastUpdateTime', Date.now().toString());
-            localStorage.setItem('remainingTime', remainingTime.toString());
-          }
-        } catch (error) {
-          console.error('Background tracking error:', error);
-        }
-      }, 30000); // Check every 30 seconds for better battery life
-    };
-
-    const stopBackgroundTracking = () => {
-      if (backgroundTrackingInterval) {
-        console.log('Stopping background tracking');
-        clearInterval(backgroundTrackingInterval);
-        backgroundTrackingInterval = null;
-      }
-      isTracking = false;
-    };
-
-    // Define handleVisibilityChange in the outer scope
-    const handleVisibilityChange = () => {
-      const isVisible = document.visibilityState === 'visible';
-      console.log('Document visibility changed:', isVisible ? 'visible' : 'hidden');
-      
-      // Always keep tracking running, regardless of visibility
-      startBackgroundTracking();
-    };
-
-    const setupAppStateListeners = async () => {
-      console.log('Setting up app state listeners');
-      
-      // Add visibility change listener
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-
-      // Add Capacitor app state listener
-      App.addListener('appStateChange', ({ isActive }) => {
-        console.log('App state changed. Is active:', isActive);
-        // Always keep tracking running, regardless of app state
-        startBackgroundTracking();
-      });
-
-      // Start tracking immediately
-      console.log('Starting initial tracking');
-      startBackgroundTracking();
-    };
-
-    setupAppStateListeners();
-
-    // Cleanup function
     return () => {
-      console.log('Cleaning up background tracking');
-      stopBackgroundTracking();
-      // Remove app state listener
-      App.removeAllListeners();
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      backgroundService.cleanup();
     };
   }, []);
 
@@ -550,45 +488,6 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     }
   };
 
-  // Update the checkScreenTimeLimit function to use today's total time
-  const checkScreenTimeLimit = async () => {
-    try {
-      console.log('Starting screen time limit check...');
-      
-      // Get total screen time for today using the same calculation as the statistics page
-      const totalTime = getTotalScreenTime();
-      console.log('Total screen time for today:', totalTime);
-      
-      // Calculate remaining minutes
-      const remainingMinutes = Math.max(0, screenTimeLimit - totalTime);
-      console.log('Remaining minutes:', remainingMinutes);
-      
-      if (!notificationsEnabled) {
-        console.log('Notifications are disabled, skipping check');
-        return;
-      }
-
-      // Call native method with exact values from our calculations
-      const appUsageTracker = AppUsageTrackerService.getInstance();
-      console.log('Calling native checkScreenTimeLimit with values:', {
-        totalTime: Math.round(totalTime),
-        limit: screenTimeLimit,
-        remainingMinutes: Math.round(remainingMinutes)
-      });
-      
-      await appUsageTracker.checkScreenTimeLimit({
-        totalTime: Math.round(totalTime),
-        limit: screenTimeLimit,
-        remainingMinutes: Math.round(remainingMinutes)
-      });
-      
-      console.log('Screen time limit check completed successfully');
-    } catch (error) {
-      console.error('Error in checkScreenTimeLimit:', error);
-      logError(`Error in checkScreenTimeLimit: ${error}`);
-    }
-  };
-
   // Get app usage data for a specific time range
   const getAppUsageData = async (startTime?: number, endTime?: number): Promise<TrackerAppUsage[]> => {
     try {
@@ -664,7 +563,7 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
       
       // Check screen time limit after updating data
       try {
-        await checkScreenTimeLimit();
+        await checkLimit();
         console.log('Screen time limit check completed after data update');
       } catch (error: any) {
         console.error('Error checking screen time limit after data update:', error);

@@ -167,14 +167,15 @@ public class AppUsageService extends Service {
                 
                 NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
-                    "App Usage Service",
-                    NotificationManager.IMPORTANCE_LOW
+                    "Screen Time Alerts",
+                    NotificationManager.IMPORTANCE_HIGH
                 );
-                channel.setDescription("Tracks app usage in the background");
-                channel.setShowBadge(false);
-                channel.setSound(null, null);
-                channel.enableLights(false);
-                channel.enableVibration(false);
+                channel.setDescription("Alerts for screen time limits and usage");
+                channel.setShowBadge(true);
+                channel.enableLights(true);
+                channel.setLightColor(android.graphics.Color.BLUE);
+                channel.enableVibration(true);
+                channel.setVibrationPattern(new long[]{100, 200, 300, 400, 500});
                 
                 notificationManager.createNotificationChannel(channel);
                 Log.d(TAG, "Created notification channel successfully");

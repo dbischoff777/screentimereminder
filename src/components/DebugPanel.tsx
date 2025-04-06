@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useScreenTime } from '../context/ScreenTimeContext';
+import { App } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
+import BackgroundUpdateService from '../services/BackgroundUpdateService';
 import { Paper, Text, Group, Badge, Stack, ScrollArea } from '@mantine/core';
 import { FiCheckCircle, FiXCircle, FiAlertCircle, FiClock, FiImage } from 'react-icons/fi';
 import AppUsageTracker from '../services/AppUsageTracker';
-import { useScreenTime } from '../context/ScreenTimeContext';
 
 interface DebugInfo {
   usagePermission: boolean;
@@ -14,12 +17,26 @@ interface DebugInfo {
   appIconStatus: {
     totalApps: number;
     appsWithIcons: number;
-    missingIcons: string[];
+    appsWithoutIcons: number;
+  };
+  notificationStatus: {
+    lastLimitReached: number;
+    lastApproachingLimit: number;
+    notificationFrequency: number;
+    screenTimeLimit: number;
+    currentScreenTime: number;
+    remainingMinutes: number;
   };
 }
 
 const DebugPanel = () => {
-  const { appUsageData } = useScreenTime();
+  const { appUsageData, getTotalScreenTime, screenTimeLimit } = useScreenTime();
+  const [appState, setAppState] = useState<string>('active');
+  const [lastUpdateTime, setLastUpdateTime] = useState<string>('Never');
+  const [backgroundServiceStatus, setBackgroundServiceStatus] = useState<string>('Unknown');
+  const [lastBackgroundUpdate, setLastBackgroundUpdate] = useState<string>('Never');
+  const [updateInterval, setUpdateInterval] = useState<number>(0);
+  const [isTracking, setIsTracking] = useState<boolean>(false);
   const [debugInfo, setDebugInfo] = useState<DebugInfo>({
     usagePermission: false,
     batteryOptimization: false,
@@ -30,11 +47,59 @@ const DebugPanel = () => {
     appIconStatus: {
       totalApps: 0,
       appsWithIcons: 0,
-      missingIcons: []
+      appsWithoutIcons: 0
+    },
+    notificationStatus: {
+      lastLimitReached: 0,
+      lastApproachingLimit: 0,
+      notificationFrequency: 0,
+      screenTimeLimit: 0,
+      currentScreenTime: 0,
+      remainingMinutes: 0
     }
   });
 
   const trackerService = AppUsageTracker.getInstance();
+
+  useEffect(() => {
+    let appStateListener: any;
+    
+    // Listen for app state changes
+    App.addListener('appStateChange', ({ isActive }) => {
+      setAppState(isActive ? 'active' : 'background');
+    }).then(listener => {
+      appStateListener = listener;
+    });
+
+    // Get background service status
+    const backgroundService = BackgroundUpdateService.getInstance();
+    const status = backgroundService.getServiceStatus();
+    setBackgroundServiceStatus(status.isTracking ? 'Active' : 'Inactive');
+    setUpdateInterval(status.updateInterval / 1000); // Convert to seconds
+    setIsTracking(status.isTracking);
+    setLastBackgroundUpdate(status.lastBackgroundUpdateTime ? 
+      new Date(status.lastBackgroundUpdateTime).toLocaleTimeString() : 'Never');
+
+    // Set up interval to update last update time
+    const interval = setInterval(() => {
+      const now = new Date();
+      setLastUpdateTime(now.toLocaleTimeString());
+      
+      // Update background service status
+      const currentStatus = backgroundService.getServiceStatus();
+      setBackgroundServiceStatus(currentStatus.isTracking ? 'Active' : 'Inactive');
+      setIsTracking(currentStatus.isTracking);
+      setLastBackgroundUpdate(currentStatus.lastBackgroundUpdateTime ? 
+        new Date(currentStatus.lastBackgroundUpdateTime).toLocaleTimeString() : 'Never');
+    }, 1000);
+
+    return () => {
+      if (appStateListener) {
+        appStateListener.remove();
+      }
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     const checkStatus = async () => {
@@ -55,11 +120,15 @@ const DebugPanel = () => {
         // Get recent errors
         const errors = JSON.parse(localStorage.getItem('debugErrors') || '[]');
 
-        // Calculate app icon status
-        const missingIcons = appUsageData
-          .filter(app => !app.icon)
-          .map(app => app.name);
-        
+        // Get notification status
+        const prefs = await trackerService.getSharedPreferences();
+        const lastLimitReached = prefs.lastLimitReachedNotification;
+        const lastApproachingLimit = prefs.lastApproachingLimitNotification;
+        const screenTimeLimit = prefs.screenTimeLimit;
+        const notificationFrequency = prefs.notificationFrequency;
+        const currentScreenTime = prefs.totalScreenTime;
+        const remainingMinutes = Math.max(0, screenTimeLimit - currentScreenTime);
+
         setDebugInfo({
           usagePermission: hasUsagePermission,
           batteryOptimization: isBatteryOptimizationExempt,
@@ -70,7 +139,15 @@ const DebugPanel = () => {
           appIconStatus: {
             totalApps: appUsageData.length,
             appsWithIcons: appUsageData.filter(app => app.icon).length,
-            missingIcons
+            appsWithoutIcons: appUsageData.filter(app => !app.icon).length
+          },
+          notificationStatus: {
+            lastLimitReached,
+            lastApproachingLimit,
+            notificationFrequency,
+            screenTimeLimit,
+            currentScreenTime,
+            remainingMinutes
           }
         });
       } catch (error: any) {
@@ -90,6 +167,41 @@ const DebugPanel = () => {
 
     return () => clearInterval(interval);
   }, [appUsageData]);
+
+  useEffect(() => {
+    const checkNotificationStatus = async () => {
+      try {
+        const prefs = await trackerService.getSharedPreferences();
+        setDebugInfo(prev => ({
+          ...prev,
+          notificationStatus: {
+            lastLimitReached: prefs.lastLimitReachedNotification,
+            lastApproachingLimit: prefs.lastApproachingLimitNotification,
+            notificationFrequency: prefs.notificationFrequency,
+            screenTimeLimit: prefs.screenTimeLimit,
+            currentScreenTime: prefs.totalScreenTime,
+            remainingMinutes: Math.max(0, prefs.screenTimeLimit - prefs.totalScreenTime)
+          }
+        }));
+      } catch (error) {
+        console.error('Error getting notification status:', error);
+      }
+    };
+
+    checkNotificationStatus();
+    const interval = setInterval(checkNotificationStatus, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Calculate total screen time
+  const totalScreenTime = getTotalScreenTime();
+  const totalHours = (totalScreenTime / 60).toFixed(2);
+  const remainingMinutes = Math.max(0, screenTimeLimit - totalScreenTime);
+
+  // Calculate missing icons list
+  const missingIcons = appUsageData
+    .filter(app => !app.icon)
+    .map(app => app.name);
 
   return (
     <Paper 
@@ -164,25 +276,19 @@ const DebugPanel = () => {
         </Group>
 
         {/* Missing Icons List */}
-        {debugInfo.appIconStatus.missingIcons.length > 0 && (
+        {debugInfo.appIconStatus.appsWithoutIcons > 0 && (
           <div>
             <Text size="sm" style={{ color: '#FF00FF', marginBottom: '0.5rem' }}>
-              Apps Missing Icons
+              Apps Without Icons ({debugInfo.appIconStatus.appsWithoutIcons}):
             </Text>
             <ScrollArea h={100}>
               <Stack gap="xs">
-                {debugInfo.appIconStatus.missingIcons.map((appName, index) => (
+                {missingIcons.map((appName: string, index: number) => (
                   <Text 
                     key={index} 
-                    size="xs" 
-                    style={{ 
-                      color: '#FF0000',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem'
-                    }}
+                    size="sm" 
+                    style={{ color: '#AAAAAA' }}
                   >
-                    <FiAlertCircle />
                     {appName}
                   </Text>
                 ))}
@@ -221,6 +327,75 @@ const DebugPanel = () => {
               )}
             </Stack>
           </ScrollArea>
+        </div>
+
+        <div style={{ marginBottom: '15px' }}>
+          <h4>App State</h4>
+          <p>Current State: {appState}</p>
+          <p>Last Update: {lastUpdateTime}</p>
+          <p>Platform: {Capacitor.getPlatform()}</p>
+        </div>
+
+        <div style={{ marginBottom: '15px' }}>
+          <h4>Background Service</h4>
+          <p>Status: {backgroundServiceStatus}</p>
+          <p>Tracking Active: {isTracking ? 'Yes' : 'No'}</p>
+          <p>Update Interval: {updateInterval} seconds</p>
+          <p>Last Background Update: {lastBackgroundUpdate}</p>
+        </div>
+
+        <div style={{ marginBottom: '15px' }}>
+          <h4>Screen Time Data</h4>
+          <p>Total Screen Time: {totalScreenTime.toFixed(2)} minutes ({totalHours} hours)</p>
+          <p>Screen Time Limit: {screenTimeLimit} minutes</p>
+          <p>Remaining Minutes: {remainingMinutes}</p>
+          <p>Apps Tracked: {appUsageData.length}</p>
+        </div>
+
+        <div style={{ marginBottom: '15px' }}>
+          <h4>Raw Data</h4>
+          <pre style={{ 
+            backgroundColor: '#fff', 
+            padding: '10px', 
+            borderRadius: '4px',
+            overflow: 'auto',
+            maxHeight: '200px'
+          }}>
+            {JSON.stringify(appUsageData, null, 2)}
+          </pre>
+        </div>
+
+        {/* Notification Status Section */}
+        <div>
+          <Text size="sm" style={{ color: '#FF00FF', marginBottom: '0.5rem' }}>
+            Notification Status
+          </Text>
+          <Stack gap="xs">
+            <Group justify="space-between">
+              <Text size="sm" style={{ color: '#00FFFF' }}>Last Limit Reached</Text>
+              <Text size="sm" style={{ color: '#00FFFF' }}>{debugInfo.notificationStatus.lastLimitReached}</Text>
+            </Group>
+            <Group justify="space-between">
+              <Text size="sm" style={{ color: '#00FFFF' }}>Last Approaching Limit</Text>
+              <Text size="sm" style={{ color: '#00FFFF' }}>{debugInfo.notificationStatus.lastApproachingLimit}</Text>
+            </Group>
+            <Group justify="space-between">
+              <Text size="sm" style={{ color: '#00FFFF' }}>Notification Frequency</Text>
+              <Text size="sm" style={{ color: '#00FFFF' }}>{debugInfo.notificationStatus.notificationFrequency} minutes</Text>
+            </Group>
+            <Group justify="space-between">
+              <Text size="sm" style={{ color: '#00FFFF' }}>Screen Time Limit</Text>
+              <Text size="sm" style={{ color: '#00FFFF' }}>{debugInfo.notificationStatus.screenTimeLimit} minutes</Text>
+            </Group>
+            <Group justify="space-between">
+              <Text size="sm" style={{ color: '#00FFFF' }}>Current Screen Time</Text>
+              <Text size="sm" style={{ color: '#00FFFF' }}>{debugInfo.notificationStatus.currentScreenTime.toFixed(2)} minutes</Text>
+            </Group>
+            <Group justify="space-between">
+              <Text size="sm" style={{ color: '#00FFFF' }}>Remaining Minutes</Text>
+              <Text size="sm" style={{ color: '#00FFFF' }}>{debugInfo.notificationStatus.remainingMinutes} minutes</Text>
+            </Group>
+          </Stack>
         </div>
       </Stack>
     </Paper>

@@ -4,11 +4,15 @@ package com.screentimereminder.app;
 // It uses the UsageStatsManager API to retrieve app usage data and provides methods for querying and processing this data
 
 import android.app.AppOpsManager;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.usage.UsageEvents;
 import android.app.usage.UsageStats;
 import android.app.usage.UsageStatsManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -37,6 +41,9 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.Date;
+
+import androidx.core.app.NotificationCompat;
 
 @CapacitorPlugin(name = "AppUsageTracker")
 public class AppUsageTracker extends Plugin {
@@ -58,6 +65,14 @@ public class AppUsageTracker extends Plugin {
         
         // Initialize notification service
         notificationService = new NotificationService(getContext());
+
+        // Register broadcast receiver for background updates
+        IntentFilter filter = new IntentFilter("com.screentimereminder.APP_USAGE_UPDATE");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            getContext().registerReceiver(usageUpdateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            getContext().registerReceiver(usageUpdateReceiver, filter);
+        }
     }
     
     /**
@@ -104,19 +119,8 @@ public class AppUsageTracker extends Plugin {
                 return;
             }
 
-            // Request battery optimization exemption if needed
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                PowerManager powerManager = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
-                if (powerManager != null && !powerManager.isIgnoringBatteryOptimizations(getContext().getPackageName())) {
-                    Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-                    intent.setData(android.net.Uri.parse("package:" + getContext().getPackageName()));
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    getContext().startActivity(intent);
-                }
-            }
-
             // Start the background service
-            Intent serviceIntent = new Intent(getContext(), AppUsageService.class);
+            Intent serviceIntent = new Intent(getContext(), BackgroundService.class);
             serviceIntent.setAction("START_TRACKING");
             
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -127,15 +131,40 @@ public class AppUsageTracker extends Plugin {
                 getContext().startService(serviceIntent);
             }
 
-            // Schedule periodic service check
+            // Schedule periodic updates
             if (scheduler == null || scheduler.isShutdown()) {
                 scheduler = Executors.newSingleThreadScheduledExecutor();
                 scheduler.scheduleAtFixedRate(new Runnable() {
                     @Override
                     public void run() {
-                        ensureServiceRunning();
+                        try {
+                            // Update shared preferences with latest screen time data
+                            updateSharedPreferences();
+                            // Add a small random delay to avoid exact intervals
+                            Thread.sleep((long)(Math.random() * 5000));
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error in update cycle", e);
+                        }
                     }
-                }, 1, 5, TimeUnit.MINUTES);
+                }, 1, 5, TimeUnit.MINUTES); // Check every 5 minutes
+            }
+
+            // Request battery optimization exemption
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PowerManager powerManager = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+                if (powerManager != null && !powerManager.isIgnoringBatteryOptimizations(getContext().getPackageName())) {
+                    Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                    intent.setData(android.net.Uri.parse("package:" + getContext().getPackageName()));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    getContext().startActivity(intent);
+                }
+            }
+
+            // Request usage access permission if not granted
+            if (!checkUsageStatsPermission()) {
+                Intent intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(intent);
             }
 
             JSObject ret = new JSObject();
@@ -326,66 +355,102 @@ public class AppUsageTracker extends Plugin {
     @PluginMethod
     public void checkScreenTimeLimit(PluginCall call) {
         try {
-            // Get parameters with null checks and default values
             JSObject data = call.getData();
-            Integer totalTime = data.has("totalTime") ? data.getInteger("totalTime") : 0;
-            Integer limit = data.has("limit") ? data.getInteger("limit") : 120;
-            Integer remainingMinutes = data.has("remainingMinutes") ? data.getInteger("remainingMinutes") : Math.max(0, limit - totalTime);
+            float totalTime = 0;
+            if (data.has("totalTime")) {
+                totalTime = (float) data.getDouble("totalTime");
+            }
+            int limit = data.getInteger("limit", 60);
+            int notificationFrequency = data.getInteger("notificationFrequency", 5);
             
-            Log.d(TAG, String.format("Checking screen time with values from JS - Total: %d minutes, Limit: %d minutes, Remaining: %d minutes",
-                totalTime, limit, remainingMinutes));
-            
-            // Save the limit to SharedPreferences
             SharedPreferences prefs = getContext().getSharedPreferences("ScreenTimeReminder", Context.MODE_PRIVATE);
-            prefs.edit().putInt("screenTimeLimit", limit).apply();
-            
-            // Get SharedPreferences for notification tracking
+            long lastLimitReached = prefs.getLong("lastLimitReachedNotification", 0);
+            long lastApproachingLimit = prefs.getLong("lastApproachingLimitNotification", 0);
             long currentTime = System.currentTimeMillis();
             
-            // Get last notification times
-            long lastLimitReachedNotification = prefs.getLong("lastLimitReachedNotification", 0);
-            long lastApproachingLimitNotification = prefs.getLong("lastApproachingLimitNotification", 0);
+            // Calculate remaining time
+            float remainingMinutes = limit - totalTime;
+            
+            // Update total screen time
+            prefs.edit().putFloat("totalScreenTime", totalTime).apply();
             
             // Define cooldown period (1 minute in milliseconds)
             long NOTIFICATION_COOLDOWN = 60 * 1000;
             
-            // Check if enough time has passed since last notifications
-            boolean canShowLimitReached = (currentTime - lastLimitReachedNotification) >= NOTIFICATION_COOLDOWN;
-            boolean canShowApproaching = (currentTime - lastApproachingLimitNotification) >= NOTIFICATION_COOLDOWN;
-            
-            if (totalTime >= limit && canShowLimitReached) {
-                // Show limit reached notification with exact data from JS
-                try {
-                    notificationService.showLimitReachedNotification(totalTime, limit);
-                    Log.d(TAG, "Limit reached notification sent successfully with data from JS");
-                    // Update last notification time
+            // Check if we should show notifications
+            if (remainingMinutes <= 0) {
+                // Check if enough time has passed since last limit reached notification
+                if (currentTime - lastLimitReached >= NOTIFICATION_COOLDOWN) {
+                    // Show limit reached notification
+                    showNotification("Screen Time Limit Reached", 
+                        "You have reached your daily screen time limit of " + limit + " minutes.");
+                    
+                    // Update last limit reached timestamp
                     prefs.edit().putLong("lastLimitReachedNotification", currentTime).apply();
-                } catch (Exception e) {
-                    Log.e(TAG, "Error showing limit reached notification", e);
-                    throw e;
+                    Log.d(TAG, "Updated lastLimitReachedNotification to: " + currentTime);
                 }
-            } else if (remainingMinutes <= 5 && remainingMinutes > 0 && canShowApproaching) {
-                // Show approaching limit notification with exact data from JS
-                try {
-                    notificationService.showApproachingLimitNotification(totalTime, limit, remainingMinutes);
-                    Log.d(TAG, "Approaching limit notification sent successfully with data from JS");
-                    // Update last notification time
+            } else if (remainingMinutes <= notificationFrequency) {
+                // Check if enough time has passed since last approaching limit notification
+                if (currentTime - lastApproachingLimit >= NOTIFICATION_COOLDOWN) {
+                    // Show approaching limit notification
+                    showNotification("Approaching Screen Time Limit", 
+                        "You have " + Math.round(remainingMinutes) + " minutes remaining.");
+                    
+                    // Update last approaching limit timestamp
                     prefs.edit().putLong("lastApproachingLimitNotification", currentTime).apply();
-                } catch (Exception e) {
-                    Log.e(TAG, "Error showing approaching limit notification", e);
-                    throw e;
+                    Log.d(TAG, "Updated lastApproachingLimitNotification to: " + currentTime);
                 }
-            } else {
-                Log.d(TAG, "Notifications skipped due to cooldown or conditions not met");
             }
             
-            JSObject ret = new JSObject();
-            ret.put("value", true);
-            call.resolve(ret);
-            Log.d(TAG, "checkScreenTimeLimit completed successfully");
+            call.resolve();
         } catch (Exception e) {
-            Log.e(TAG, "Error in checkScreenTimeLimit", e);
+            Log.e(TAG, "Error checking screen time limit", e);
             call.reject("Failed to check screen time limit: " + e.getMessage(), e);
+        }
+    }
+    
+    @PluginMethod
+    public void getSharedPreferences(PluginCall call) {
+        try {
+            SharedPreferences prefs = getContext().getSharedPreferences("ScreenTimeReminder", Context.MODE_PRIVATE);
+            
+            // Get values with correct defaults
+            long lastLimitReached = prefs.getLong("lastLimitReachedNotification", 0);
+            long lastApproachingLimit = prefs.getLong("lastApproachingLimitNotification", 0);
+            int screenTimeLimit = prefs.getInt("screenTimeLimit", 60); // Default to 60 minutes
+            int notificationFrequency = prefs.getInt("notificationFrequency", 5); // Default to 5 minutes
+            float totalScreenTime = prefs.getFloat("totalScreenTime", 0);
+            
+            // If timestamps are 0, set them to current time
+            long currentTime = System.currentTimeMillis();
+            if (lastLimitReached == 0) {
+                lastLimitReached = currentTime;
+                prefs.edit().putLong("lastLimitReachedNotification", currentTime).apply();
+            }
+            if (lastApproachingLimit == 0) {
+                lastApproachingLimit = currentTime;
+                prefs.edit().putLong("lastApproachingLimitNotification", currentTime).apply();
+            }
+            
+            // Log the values for debugging
+            Log.d(TAG, "SharedPreferences values:");
+            Log.d(TAG, "lastLimitReached: " + lastLimitReached + " (" + new Date(lastLimitReached).toString() + ")");
+            Log.d(TAG, "lastApproachingLimit: " + lastApproachingLimit + " (" + new Date(lastApproachingLimit).toString() + ")");
+            Log.d(TAG, "screenTimeLimit: " + screenTimeLimit);
+            Log.d(TAG, "notificationFrequency: " + notificationFrequency);
+            Log.d(TAG, "totalScreenTime: " + totalScreenTime);
+            
+            JSObject ret = new JSObject();
+            ret.put("lastLimitReachedNotification", lastLimitReached);
+            ret.put("lastApproachingLimitNotification", lastApproachingLimit);
+            ret.put("screenTimeLimit", screenTimeLimit);
+            ret.put("notificationFrequency", notificationFrequency);
+            ret.put("totalScreenTime", totalScreenTime);
+            
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting shared preferences", e);
+            call.reject("Failed to get shared preferences: " + e.getMessage(), e);
         }
     }
     
@@ -394,6 +459,12 @@ public class AppUsageTracker extends Plugin {
         if (scheduler != null && !scheduler.isShutdown()) {
             scheduler.shutdown();
             scheduler = null;
+        }
+        // Unregister broadcast receiver
+        try {
+            getContext().unregisterReceiver(usageUpdateReceiver);
+        } catch (Exception e) {
+            Log.e(TAG, "Error unregistering broadcast receiver", e);
         }
         super.handleOnDestroy();
     }
@@ -834,24 +905,282 @@ public class AppUsageTracker extends Plugin {
     private void ensureServiceRunning() {
         try {
             android.app.ActivityManager manager = (android.app.ActivityManager) getContext().getSystemService(Context.ACTIVITY_SERVICE);
+            boolean isServiceRunning = false;
+            
             for (android.app.ActivityManager.RunningServiceInfo service : manager.getRunningServices(Integer.MAX_VALUE)) {
-                if (AppUsageService.class.getName().equals(service.service.getClassName())) {
-                    Log.d(TAG, "Service is already running");
-                    return;
+                if (BackgroundService.class.getName().equals(service.service.getClassName())) {
+                    isServiceRunning = true;
+                    break;
                 }
             }
             
-            Log.d(TAG, "Service not running, restarting...");
-            Intent serviceIntent = new Intent(getContext(), AppUsageService.class);
-            serviceIntent.setAction("START_TRACKING");
-            
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                getContext().startForegroundService(serviceIntent);
-            } else {
-                getContext().startService(serviceIntent);
+            if (!isServiceRunning) {
+                Log.d(TAG, "Service not running, restarting...");
+                Intent serviceIntent = new Intent(getContext(), BackgroundService.class);
+                serviceIntent.setAction("START_TRACKING");
+                
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    getContext().startForegroundService(serviceIntent);
+                } else {
+                    getContext().startService(serviceIntent);
+                }
+                
+                // Request battery optimization exemption
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    PowerManager powerManager = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+                    if (powerManager != null && !powerManager.isIgnoringBatteryOptimizations(getContext().getPackageName())) {
+                        Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                        intent.setData(android.net.Uri.parse("package:" + getContext().getPackageName()));
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        getContext().startActivity(intent);
+                    }
+                }
             }
         } catch (Exception e) {
             Log.e(TAG, "Error ensuring service is running", e);
+        }
+    }
+
+    private final BroadcastReceiver usageUpdateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            Log.d(TAG, "Received broadcast with action: " + intent.getAction());
+            if (intent.hasExtra("usageData")) {
+                String usageData = intent.getStringExtra("usageData");
+                try {
+                    Log.d(TAG, "Processing usage data: " + usageData);
+                    JSObject ret = new JSObject();
+                    ret.put("usageData", usageData);
+                    notifyListeners("appUsageUpdate", ret);
+                    Log.d(TAG, "Notified web listeners with usage data");
+                } catch (Exception e) {
+                    Log.e(TAG, "Error notifying listeners", e);
+                }
+            } else {
+                Log.w(TAG, "Received broadcast without usageData extra");
+            }
+        }
+    };
+
+    @PluginMethod
+    public void setScreenTimeLimit(PluginCall call) {
+        try {
+            int limit = call.getInt("limit", 60);
+            Log.d(TAG, "Setting screen time limit to: " + limit);
+            
+            SharedPreferences prefs = getContext().getSharedPreferences("ScreenTimeReminder", Context.MODE_PRIVATE);
+            prefs.edit()
+                .putInt("screenTimeLimit", limit)
+                .apply();
+            
+            Log.d(TAG, "Screen time limit updated successfully");
+            call.resolve();
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting screen time limit", e);
+            call.reject("Failed to set screen time limit: " + e.getMessage(), e);
+        }
+    }
+    
+    @PluginMethod
+    public void setNotificationFrequency(PluginCall call) {
+        try {
+            int frequency = call.getInt("frequency", 5);
+            Log.d(TAG, "Setting notification frequency to: " + frequency);
+            
+            SharedPreferences prefs = getContext().getSharedPreferences("ScreenTimeReminder", Context.MODE_PRIVATE);
+            prefs.edit()
+                .putInt("notificationFrequency", frequency)
+                .apply();
+            
+            Log.d(TAG, "Notification frequency updated successfully");
+            call.resolve();
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting notification frequency", e);
+            call.reject("Failed to set notification frequency: " + e.getMessage(), e);
+        }
+    }
+
+    private void updateSharedPreferences() {
+        try {
+            Log.d(TAG, "Updating shared preferences with latest screen time data");
+            
+            // Get current total screen time
+            long totalTime = getTotalScreenTimeForToday();
+            float totalMinutes = totalTime / (1000f * 60f);
+            
+            // Get shared preferences
+            SharedPreferences prefs = getContext().getSharedPreferences("ScreenTimeReminder", Context.MODE_PRIVATE);
+            
+            // Update total screen time and timestamp
+            prefs.edit()
+                .putFloat("totalScreenTime", totalMinutes)
+                .putLong("lastUpdateTime", System.currentTimeMillis())
+                .apply();
+            
+            Log.d(TAG, String.format("Updated shared preferences - Total screen time: %.2f minutes", totalMinutes));
+            
+            // Check screen time limit and show notifications if needed
+            checkScreenTimeLimit(totalMinutes);
+            
+            // Broadcast the update
+            broadcastUsageUpdate(totalMinutes);
+        } catch (Exception e) {
+            Log.e(TAG, "Error updating shared preferences", e);
+        }
+    }
+
+    private void broadcastUsageUpdate(float totalMinutes) {
+        try {
+            Log.d(TAG, "Broadcasting usage update");
+            
+            // Create a JSON object with the usage data
+            JSONObject usageData = new JSONObject();
+            usageData.put("totalMinutes", totalMinutes);
+            usageData.put("timestamp", System.currentTimeMillis());
+            
+            // Broadcast the update
+            Intent intent = new Intent("com.screentimereminder.APP_USAGE_UPDATE");
+            intent.putExtra("usageData", usageData.toString());
+            getContext().sendBroadcast(intent);
+            
+            Log.d(TAG, "Broadcasted usage update with data: " + usageData.toString());
+        } catch (Exception e) {
+            Log.e(TAG, "Error broadcasting usage update", e);
+        }
+    }
+
+    private void checkScreenTimeLimit(float totalMinutes) {
+        try {
+            // Get screen time limit from SharedPreferences
+            SharedPreferences prefs = getContext().getSharedPreferences("ScreenTimeReminder", Context.MODE_PRIVATE);
+            int screenTimeLimit = prefs.getInt("screenTimeLimit", 60); // Default 60 minutes
+            int notificationFrequency = prefs.getInt("notificationFrequency", 5); // Default 5 minutes
+            
+            // Get current time for notification tracking
+            long currentTime = System.currentTimeMillis();
+            
+            // Get last notification times
+            long lastLimitReachedNotification = prefs.getLong("lastLimitReachedNotification", 0);
+            long lastApproachingLimitNotification = prefs.getLong("lastApproachingLimitNotification", 0);
+            
+            // Define cooldown period (1 minute in milliseconds)
+            long NOTIFICATION_COOLDOWN = 60 * 1000;
+            
+            // Calculate remaining minutes
+            int remainingMinutes = Math.max(0, screenTimeLimit - (int)totalMinutes);
+            
+            // Check if enough time has passed since last notifications
+            boolean canShowLimitReached = (currentTime - lastLimitReachedNotification) >= NOTIFICATION_COOLDOWN;
+            boolean canShowApproaching = (currentTime - lastApproachingLimitNotification) >= NOTIFICATION_COOLDOWN;
+            
+            Log.d(TAG, String.format("Checking screen time limit - Total: %.2f, Limit: %d, Remaining: %d, CanShowLimit: %b, CanShowApproaching: %b",
+                totalMinutes, screenTimeLimit, remainingMinutes, canShowLimitReached, canShowApproaching));
+            
+            if (totalMinutes >= screenTimeLimit && canShowLimitReached) {
+                Log.d(TAG, "Showing limit reached notification");
+                showNotification("Screen Time Limit Reached", 
+                    "You have reached your daily screen time limit of " + screenTimeLimit + " minutes.");
+                prefs.edit().putLong("lastLimitReachedNotification", currentTime).apply();
+            } else if (remainingMinutes <= notificationFrequency && remainingMinutes > 0 && canShowApproaching) {
+                Log.d(TAG, "Showing approaching limit notification");
+                showNotification("Approaching Screen Time Limit", 
+                    "You have " + remainingMinutes + " minutes remaining.");
+                prefs.edit().putLong("lastApproachingLimitNotification", currentTime).apply();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking screen time limit", e);
+        }
+    }
+
+    private void showNotification(String title, String message) {
+        try {
+            // Get current total screen time
+            SharedPreferences prefs = getContext().getSharedPreferences("ScreenTimeReminder", Context.MODE_PRIVATE);
+            float totalScreenTime = prefs.getFloat("totalScreenTime", 0);
+            
+            // Format the time
+            int hours = (int) (totalScreenTime / 60);
+            int minutes = (int) (totalScreenTime % 60);
+            String timeString = String.format("%d hours %d minutes", hours, minutes);
+            
+            // Create the notification message
+            String notificationMessage = String.format("%s\nCurrent screen time: %s", message, timeString);
+            
+            NotificationManager notificationManager = (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                NotificationChannel channel = new NotificationChannel(
+                    "screen_time_channel",
+                    "Screen Time Notifications",
+                    NotificationManager.IMPORTANCE_DEFAULT
+                );
+                notificationManager.createNotificationChannel(channel);
+            }
+            
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(getContext(), "screen_time_channel")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(title)
+                .setContentText(notificationMessage)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(notificationMessage))
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT);
+            
+            notificationManager.notify(1, builder.build());
+            Log.d(TAG, "Showing notification: " + notificationMessage);
+        } catch (Exception e) {
+            Log.e(TAG, "Error showing notification", e);
+        }
+    }
+
+    @PluginMethod
+    public void startBackgroundService(PluginCall call) {
+        try {
+            Log.d(TAG, "Starting background service through plugin");
+            
+            // Start the background service
+            Intent serviceIntent = new Intent(getContext(), BackgroundService.class);
+            serviceIntent.setAction("START_TRACKING");
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Log.d(TAG, "Starting foreground service for Android O and above");
+                getContext().startForegroundService(serviceIntent);
+            } else {
+                Log.d(TAG, "Starting service for pre-Android O");
+                getContext().startService(serviceIntent);
+            }
+
+            // Schedule periodic service check
+            if (scheduler == null || scheduler.isShutdown()) {
+                scheduler = Executors.newSingleThreadScheduledExecutor();
+                scheduler.scheduleAtFixedRate(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            ensureServiceRunning();
+                            Thread.sleep((long)(Math.random() * 5000));
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error in service check", e);
+                        }
+                    }
+                }, 1, 5, TimeUnit.MINUTES);
+            }
+
+            // Request battery optimization exemption
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PowerManager powerManager = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+                if (powerManager != null && !powerManager.isIgnoringBatteryOptimizations(getContext().getPackageName())) {
+                    Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                    intent.setData(android.net.Uri.parse("package:" + getContext().getPackageName()));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    getContext().startActivity(intent);
+                }
+            }
+
+            JSObject ret = new JSObject();
+            ret.put("value", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting background service", e);
+            call.reject("Failed to start background service: " + e.getMessage(), e);
         }
     }
 } 
