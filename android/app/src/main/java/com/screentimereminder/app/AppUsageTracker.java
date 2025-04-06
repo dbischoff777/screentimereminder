@@ -97,108 +97,53 @@ public class AppUsageTracker extends Plugin {
      */
     @PluginMethod
     public void startTracking(PluginCall call) {
-        if (!checkUsageStatsPermission()) {
-            call.reject("Usage stats permission not granted");
-            return;
-        }
-        
         try {
-            if (scheduler != null && !scheduler.isShutdown()) {
-                call.reject("Tracking already started");
+            // Check if we have permission
+            if (!checkUsageStatsPermission()) {
+                call.reject("Usage stats permission not granted");
                 return;
             }
-            
-            // Create a new scheduler with reduced frequency (30 seconds instead of 5)
-            // This will significantly reduce battery consumption
-            scheduler = Executors.newSingleThreadScheduledExecutor();
-            
-            // Schedule the task to run every 30 seconds instead of 5
-            scheduler.scheduleAtFixedRate(() -> {
-                checkCurrentApp();
-            }, 0, 30, TimeUnit.SECONDS);
-            
-            // Add a second scheduler for more frequent screen time checks
-            scheduler.scheduleAtFixedRate(() -> {
-                try {
-                    // Get current app usage data
-                    long endTime = System.currentTimeMillis();
-                    long startTime = endTime - (24 * 60 * 60 * 1000); // Last 24 hours
-                    
-                    Map<String, UsageStats> aggregatedStats = usageStatsManager.queryAndAggregateUsageStats(startTime, endTime);
-                    
-                    if (aggregatedStats != null && !aggregatedStats.isEmpty()) {
-                        // Calculate total screen time
-                        long totalTime = 0;
-                        for (UsageStats stats : aggregatedStats.values()) {
-                            if (!isSystemApp(stats.getPackageName()) && 
-                                !stats.getPackageName().equals(getContext().getPackageName())) {
-                                totalTime += stats.getTotalTimeInForeground();
-                            }
-                        }
-                        
-                        // Convert to minutes and check limit
-                        int totalMinutes = (int) (totalTime / 60000);
-                        
-                        // Get screen time limit from SharedPreferences
-                        SharedPreferences prefs = getContext().getSharedPreferences("ScreenTimeReminder", Context.MODE_PRIVATE);
-                        int screenTimeLimit = prefs.getInt("screenTimeLimit", 120); // Default to 120 minutes if not set
-                        
-                        // Create data object for the event
-                        JSObject eventData = new JSObject();
-                        eventData.put("totalTime", totalMinutes);
-                        eventData.put("limit", screenTimeLimit);
-                        eventData.put("remainingMinutes", Math.max(0, screenTimeLimit - totalMinutes));
-                        
-                        // Notify JavaScript side about the screen time update
-                        notifyListeners("screenTimeUpdate", eventData);
-                        
-                        // Check if we need to show notifications
-                        long currentTime = System.currentTimeMillis();
-                        
-                        // Get last notification times
-                        long lastLimitReachedNotification = prefs.getLong("lastLimitReachedNotification", 0);
-                        long lastApproachingLimitNotification = prefs.getLong("lastApproachingLimitNotification", 0);
-                        
-                        // Define cooldown period (1 minute in milliseconds)
-                        long NOTIFICATION_COOLDOWN = 60 * 1000;
-                        
-                        // Check if enough time has passed since last notifications
-                        boolean canShowLimitReached = (currentTime - lastLimitReachedNotification) >= NOTIFICATION_COOLDOWN;
-                        boolean canShowApproaching = (currentTime - lastApproachingLimitNotification) >= NOTIFICATION_COOLDOWN;
-                        
-                        if (totalMinutes >= screenTimeLimit && canShowLimitReached) {
-                            // Show limit reached notification
-                            try {
-                                notificationService.showLimitReachedNotification(totalMinutes, screenTimeLimit);
-                                Log.d(TAG, "Limit reached notification sent successfully");
-                                // Update last notification time
-                                prefs.edit().putLong("lastLimitReachedNotification", currentTime).apply();
-                            } catch (Exception e) {
-                                Log.e(TAG, "Error showing limit reached notification", e);
-                            }
-                        } else if (totalMinutes < screenTimeLimit && totalMinutes >= (screenTimeLimit - 5) && canShowApproaching) {
-                            // Show approaching limit notification
-                            try {
-                                notificationService.showApproachingLimitNotification(totalMinutes, screenTimeLimit, Math.max(0, screenTimeLimit - totalMinutes));
-                                Log.d(TAG, "Approaching limit notification sent successfully");
-                                // Update last notification time
-                                prefs.edit().putLong("lastApproachingLimitNotification", currentTime).apply();
-                            } catch (Exception e) {
-                                Log.e(TAG, "Error showing approaching limit notification", e);
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Error in screen time check scheduler", e);
+
+            // Request battery optimization exemption if needed
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PowerManager powerManager = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+                if (powerManager != null && !powerManager.isIgnoringBatteryOptimizations(getContext().getPackageName())) {
+                    Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                    intent.setData(android.net.Uri.parse("package:" + getContext().getPackageName()));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    getContext().startActivity(intent);
                 }
-            }, 0, 15, TimeUnit.SECONDS); // Check every 15 seconds
+            }
+
+            // Start the background service
+            Intent serviceIntent = new Intent(getContext(), AppUsageService.class);
+            serviceIntent.setAction("START_TRACKING");
             
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Log.d(TAG, "Starting foreground service for Android O and above");
+                getContext().startForegroundService(serviceIntent);
+            } else {
+                Log.d(TAG, "Starting service for pre-Android O");
+                getContext().startService(serviceIntent);
+            }
+
+            // Schedule periodic service check
+            if (scheduler == null || scheduler.isShutdown()) {
+                scheduler = Executors.newSingleThreadScheduledExecutor();
+                scheduler.scheduleAtFixedRate(new Runnable() {
+                    @Override
+                    public void run() {
+                        ensureServiceRunning();
+                    }
+                }, 1, 5, TimeUnit.MINUTES);
+            }
+
             JSObject ret = new JSObject();
             ret.put("value", true);
             call.resolve(ret);
         } catch (Exception e) {
-            Log.e(TAG, "Error starting app usage tracking", e);
-            call.reject("Failed to start app usage tracking", e);
+            Log.e(TAG, "Error starting tracking", e);
+            call.reject("Failed to start tracking: " + e.getMessage(), e);
         }
     }
     
@@ -208,17 +153,14 @@ public class AppUsageTracker extends Plugin {
     @PluginMethod
     public void stopTracking(PluginCall call) {
         try {
-            if (scheduler != null && !scheduler.isShutdown()) {
-                scheduler.shutdown();
-                scheduler = null;
-            }
-            
-            JSObject ret = new JSObject();
-            ret.put("value", true);
-            call.resolve(ret);
+            // Stop the background service
+            Intent serviceIntent = new Intent(getContext(), AppUsageService.class);
+            getContext().stopService(serviceIntent);
+
+            call.resolve();
         } catch (Exception e) {
-            Log.e(TAG, "Error stopping app usage tracking", e);
-            call.reject("Failed to stop app usage tracking", e);
+            Log.e(TAG, "Error stopping tracking", e);
+            call.reject("Failed to stop tracking: " + e.getMessage(), e);
         }
     }
     
@@ -236,7 +178,7 @@ public class AppUsageTracker extends Plugin {
         try {
             // Get time range from parameters or use default (last 24 hours)
             long endTime = System.currentTimeMillis();
-            long startTime = endTime - (24 * 60 * 60 * 1000); // 24 hours ago
+            long startTime = getStartOfDay(); // Use start of day instead of 24 hours ago
             
             if (call.hasOption("startTime")) {
                 startTime = call.getLong("startTime");
@@ -247,63 +189,43 @@ public class AppUsageTracker extends Plugin {
             
             Log.d(TAG, "Getting app usage data from " + new java.util.Date(startTime) + 
                   " to " + new java.util.Date(endTime));
+
+            // First try to get data from the AppUsageService
+            Intent serviceIntent = new Intent(getContext(), AppUsageService.class);
+            serviceIntent.setAction("GET_USAGE_DATA");
+            getContext().startService(serviceIntent);
             
-            // Use queryAndAggregateUsageStats for more efficient data retrieval
-            Map<String, UsageStats> aggregatedStats = usageStatsManager.queryAndAggregateUsageStats(startTime, endTime);
+            // Query usage stats directly
+            List<UsageStats> statsList = usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_BEST, 
+                startTime, 
+                endTime
+            );
             
-            if (aggregatedStats == null || aggregatedStats.isEmpty()) {
-                Log.w(TAG, "No usage data found with queryAndAggregateUsageStats, trying direct query...");
-                
-                // Try direct query with INTERVAL_DAILY as fallback
-                List<UsageStats> statsList = usageStatsManager.queryUsageStats(
-                    UsageStatsManager.INTERVAL_DAILY, startTime, endTime);
-                
-                if (statsList == null || statsList.isEmpty()) {
-                    Log.w(TAG, "No usage data found with direct query either");
-                    
-                    // Try with a longer time range as a last resort
-                    long extendedStartTime = endTime - (7 * 24 * 60 * 60 * 1000); // 7 days ago
-                    Log.d(TAG, "Trying extended time range: " + new java.util.Date(extendedStartTime) + 
-                          " to " + new java.util.Date(endTime));
-                    
-                    statsList = usageStatsManager.queryUsageStats(
-                        UsageStatsManager.INTERVAL_WEEKLY, extendedStartTime, endTime);
-                    
-                    if (statsList == null || statsList.isEmpty()) {
-                        Log.w(TAG, "Still no usage data found with extended time range");
-                        JSONArray emptyArray = new JSONArray();
-                        JSObject result = new JSObject();
-                        result.put("data", emptyArray.toString());
-                        call.resolve(result);
-                        return;
-                    }
-                }
-                
-                // Convert the list to a map
-                aggregatedStats = new HashMap<>();
-                for (UsageStats stats : statsList) {
-                    if (stats.getTotalTimeInForeground() > 0) {
-                        aggregatedStats.put(stats.getPackageName(), stats);
-                    }
-                }
-                
-                if (aggregatedStats.isEmpty()) {
-                    Log.w(TAG, "No apps with foreground time found");
-                    JSONArray emptyArray = new JSONArray();
-                    JSObject result = new JSObject();
-                    result.put("data", emptyArray.toString());
-                    call.resolve(result);
-                    return;
-                }
+            if (statsList == null || statsList.isEmpty()) {
+                Log.w(TAG, "No usage data found with INTERVAL_BEST, trying INTERVAL_DAILY");
+                statsList = usageStatsManager.queryUsageStats(
+                    UsageStatsManager.INTERVAL_DAILY,
+                    startTime,
+                    endTime
+                );
             }
             
-            Log.d(TAG, "Found " + aggregatedStats.size() + " app usage records");
+            if (statsList == null || statsList.isEmpty()) {
+                Log.w(TAG, "No usage data found with any interval");
+                JSONArray emptyArray = new JSONArray();
+                JSObject result = new JSObject();
+                result.put("data", emptyArray.toString());
+                call.resolve(result);
+                return;
+            }
             
-            // Convert the aggregated stats to our JSON format
+            Log.d(TAG, "Found " + statsList.size() + " app usage records");
+            
+            // Convert the stats to our JSON format
             JSONArray usageData = new JSONArray();
-            for (Map.Entry<String, UsageStats> entry : aggregatedStats.entrySet()) {
-                String packageName = entry.getKey();
-                UsageStats stats = entry.getValue();
+            for (UsageStats stats : statsList) {
+                String packageName = stats.getPackageName();
                 
                 // Skip system apps and our own app
                 if (isSystemApp(packageName) || packageName.equals(getContext().getPackageName())) {
@@ -321,15 +243,18 @@ public class AppUsageTracker extends Plugin {
                     appUsage.put("time", timeInMinutes);
                     appUsage.put("lastUsed", stats.getLastTimeUsed());
                     
-                    // Log icon status
-                    String iconBase64 = appUsage.optString("icon", "");
-                    Log.d(TAG, "App " + appUsage.optString("name", packageName) + 
-                          " - Icon available: " + (iconBase64 != null && !iconBase64.isEmpty()));
+                    // Add additional usage details
+                    appUsage.put("firstTimeStamp", stats.getFirstTimeStamp());
+                    appUsage.put("lastTimeStamp", stats.getLastTimeStamp());
+                    appUsage.put("totalTimeInForeground", timeInMinutes);
                     
                     usageData.put(appUsage);
                     
-                    Log.d(TAG, "App " + getAppName(packageName) + 
-                          " used for " + timeInMinutes + " minutes");
+                    Log.d(TAG, String.format("App %s used for %.2f minutes (last used: %s)", 
+                        getAppName(packageName), 
+                        timeInMinutes,
+                        new java.util.Date(stats.getLastTimeUsed())
+                    ));
                 }
             }
             
@@ -904,5 +829,29 @@ public class AppUsageTracker extends Plugin {
         calendar.set(Calendar.SECOND, 0);
         calendar.set(Calendar.MILLISECOND, 0);
         return calendar.getTimeInMillis();
+    }
+
+    private void ensureServiceRunning() {
+        try {
+            android.app.ActivityManager manager = (android.app.ActivityManager) getContext().getSystemService(Context.ACTIVITY_SERVICE);
+            for (android.app.ActivityManager.RunningServiceInfo service : manager.getRunningServices(Integer.MAX_VALUE)) {
+                if (AppUsageService.class.getName().equals(service.service.getClassName())) {
+                    Log.d(TAG, "Service is already running");
+                    return;
+                }
+            }
+            
+            Log.d(TAG, "Service not running, restarting...");
+            Intent serviceIntent = new Intent(getContext(), AppUsageService.class);
+            serviceIntent.setAction("START_TRACKING");
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                getContext().startForegroundService(serviceIntent);
+            } else {
+                getContext().startService(serviceIntent);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error ensuring service is running", e);
+        }
     }
 } 

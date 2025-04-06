@@ -4,6 +4,9 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.Service;
+import android.app.usage.UsageEvents;
+import android.app.usage.UsageStatsManager;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Binder;
 import android.os.Build;
@@ -15,10 +18,14 @@ import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 
+import java.util.HashMap;
+import java.util.Map;
+
 public class BackgroundService extends Service {
     private static final String TAG = "BackgroundService";
     private static final String CHANNEL_ID = "ScreenTimeReminderChannel";
     private static final int NOTIFICATION_ID = 1;
+    private static final long UPDATE_INTERVAL = 60000; // 1 minute
     private static boolean isRunning = false;
 
     private final IBinder binder = new LocalBinder();
@@ -26,6 +33,11 @@ public class BackgroundService extends Service {
     private long startTime;
     private boolean isTracking = false;
     private PowerManager.WakeLock wakeLock;
+    private UsageStatsManager usageStatsManager;
+    private String lastForegroundApp = "";
+    private long lastUpdateTime = 0;
+    private Map<String, Long> appUsageMap = new HashMap<>();
+    private Runnable updateRunnable;
 
     public class LocalBinder extends Binder {
         BackgroundService getService() {
@@ -42,6 +54,16 @@ public class BackgroundService extends Service {
             mainHandler = new Handler(Looper.getMainLooper());
             startTime = System.currentTimeMillis();
             isRunning = true;
+            usageStatsManager = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+            
+            // Set up the update runnable
+            updateRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    updateAppUsage();
+                    mainHandler.postDelayed(this, UPDATE_INTERVAL);
+                }
+            };
             
             // Acquire wake lock with error handling
             try {
@@ -71,10 +93,91 @@ public class BackgroundService extends Service {
             if (notification != null) {
                 startForeground(NOTIFICATION_ID, notification);
             }
+            
+            // Start the update runnable
+            if (updateRunnable != null) {
+                mainHandler.post(updateRunnable);
+            }
+            
             return START_STICKY;
         } catch (Exception e) {
             Log.e(TAG, "Error in onStartCommand", e);
             return START_NOT_STICKY;
+        }
+    }
+
+    private void updateAppUsage() {
+        try {
+            long currentTime = System.currentTimeMillis();
+            long startTime = lastUpdateTime > 0 ? lastUpdateTime : currentTime - UPDATE_INTERVAL;
+            
+            UsageEvents usageEvents = usageStatsManager.queryEvents(startTime, currentTime);
+            UsageEvents.Event event = new UsageEvents.Event();
+            
+            while (usageEvents.hasNextEvent()) {
+                usageEvents.getNextEvent(event);
+                if (event.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                    String packageName = event.getPackageName();
+                    
+                    // Update usage time for the previous app
+                    if (!lastForegroundApp.isEmpty() && !lastForegroundApp.equals(packageName)) {
+                        long timeSpent = currentTime - lastUpdateTime;
+                        updateAppUsageTime(lastForegroundApp, timeSpent);
+                    }
+                    
+                    lastForegroundApp = packageName;
+                    lastUpdateTime = currentTime;
+                }
+            }
+            
+            // Update the current app's usage time
+            if (!lastForegroundApp.isEmpty()) {
+                long timeSpent = currentTime - lastUpdateTime;
+                updateAppUsageTime(lastForegroundApp, timeSpent);
+                lastUpdateTime = currentTime;
+            }
+            
+            // Broadcast the updated usage data
+            broadcastUsageData();
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error updating app usage", e);
+        }
+    }
+
+    private void updateAppUsageTime(String packageName, long timeSpent) {
+        long currentUsage = appUsageMap.getOrDefault(packageName, 0L);
+        appUsageMap.put(packageName, currentUsage + timeSpent);
+    }
+
+    private void broadcastUsageData() {
+        try {
+            // Convert usage data to JSON
+            StringBuilder jsonBuilder = new StringBuilder();
+            jsonBuilder.append("[");
+            
+            boolean first = true;
+            for (Map.Entry<String, Long> entry : appUsageMap.entrySet()) {
+                if (!first) {
+                    jsonBuilder.append(",");
+                }
+                first = false;
+                
+                jsonBuilder.append("{")
+                    .append("\"packageName\":\"").append(entry.getKey()).append("\",")
+                    .append("\"time\":").append(entry.getValue() / 60000.0) // Convert to minutes
+                    .append("}");
+            }
+            
+            jsonBuilder.append("]");
+            
+            // Broadcast the data
+            Intent intent = new Intent("com.screentimereminder.APP_USAGE_UPDATE");
+            intent.putExtra("usageData", jsonBuilder.toString());
+            sendBroadcast(intent);
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error broadcasting usage data", e);
         }
     }
 
@@ -96,6 +199,11 @@ public class BackgroundService extends Service {
         Log.d(TAG, "Service onDestroy");
         try {
             isRunning = false;
+            
+            // Remove the update runnable
+            if (updateRunnable != null) {
+                mainHandler.removeCallbacks(updateRunnable);
+            }
             
             // Release wake lock safely
             if (wakeLock != null && wakeLock.isHeld()) {

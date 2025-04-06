@@ -68,8 +68,15 @@ export default class AppUsageTrackerService {
       // Listen for app usage updates from the native side
       document.addEventListener('com.screentimereminder.APP_USAGE_UPDATE', (event: any) => {
         try {
-          const usageData = JSON.parse(event.detail.usageData);
-          this.notifyListeners(usageData);
+          const data = JSON.parse(event.detail.usageData);
+          // Update total screen time in localStorage
+          if (data.totalScreenTime !== undefined) {
+            localStorage.setItem('totalTodayScreenTime', data.totalScreenTime.toString());
+          }
+          // Notify listeners with app usage data
+          if (data.apps) {
+            this.notifyListeners(data.apps);
+          }
         } catch (error) {
           console.error('Error processing app usage update:', error);
         }
