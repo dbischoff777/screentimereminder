@@ -1054,7 +1054,6 @@ public class AppUsageTracker extends Plugin {
             // Get screen time limit from SharedPreferences
             SharedPreferences prefs = getContext().getSharedPreferences("ScreenTimeReminder", Context.MODE_PRIVATE);
             int screenTimeLimit = prefs.getInt("screenTimeLimit", 60); // Default 60 minutes
-            int notificationFrequency = prefs.getInt("notificationFrequency", 5); // Default 5 minutes
             
             // Get current time for notification tracking
             long currentTime = System.currentTimeMillis();
@@ -1066,25 +1065,29 @@ public class AppUsageTracker extends Plugin {
             // Define cooldown period (1 minute in milliseconds)
             long NOTIFICATION_COOLDOWN = 60 * 1000;
             
-            // Calculate remaining minutes
-            int remainingMinutes = Math.max(0, screenTimeLimit - (int)totalMinutes);
+            // Calculate remaining minutes and percentage used
+            float remainingMinutes = Math.max(0, screenTimeLimit - totalMinutes);
+            float percentageUsed = (totalMinutes / screenTimeLimit) * 100;
             
             // Check if enough time has passed since last notifications
             boolean canShowLimitReached = (currentTime - lastLimitReachedNotification) >= NOTIFICATION_COOLDOWN;
             boolean canShowApproaching = (currentTime - lastApproachingLimitNotification) >= NOTIFICATION_COOLDOWN;
             
-            Log.d(TAG, String.format("Checking screen time limit - Total: %.2f, Limit: %d, Remaining: %d, CanShowLimit: %b, CanShowApproaching: %b",
-                totalMinutes, screenTimeLimit, remainingMinutes, canShowLimitReached, canShowApproaching));
+            Log.d(TAG, String.format("Checking screen time limit - Total: %.2f, Limit: %d, Remaining: %.2f, Percentage: %.1f%%, CanShowLimit: %b, CanShowApproaching: %b",
+                totalMinutes, screenTimeLimit, remainingMinutes, percentageUsed, canShowLimitReached, canShowApproaching));
             
+            // First check if limit is reached
             if (totalMinutes >= screenTimeLimit && canShowLimitReached) {
                 Log.d(TAG, "Showing limit reached notification");
                 showNotification("Screen Time Limit Reached", 
                     "You have reached your daily screen time limit of " + screenTimeLimit + " minutes.");
                 prefs.edit().putLong("lastLimitReachedNotification", currentTime).apply();
-            } else if (remainingMinutes <= notificationFrequency && remainingMinutes > 0 && canShowApproaching) {
+            } 
+            // Only show approaching limit if we haven't reached the limit yet and percentage is >= 80%
+            else if (totalMinutes < screenTimeLimit && percentageUsed >= 80 && canShowApproaching) {
                 Log.d(TAG, "Showing approaching limit notification");
                 showNotification("Approaching Screen Time Limit", 
-                    "You have " + remainingMinutes + " minutes remaining.");
+                    "You have " + Math.round(remainingMinutes) + " minutes remaining (" + Math.round(percentageUsed) + "% of limit used).");
                 prefs.edit().putLong("lastApproachingLimitNotification", currentTime).apply();
             }
         } catch (Exception e) {

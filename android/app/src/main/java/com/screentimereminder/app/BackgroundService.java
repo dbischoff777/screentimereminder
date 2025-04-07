@@ -14,6 +14,7 @@ import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
+import android.graphics.Color;
 import android.os.Binder;
 import android.os.Build;
 import android.os.Handler;
@@ -341,7 +342,7 @@ public class BackgroundService extends Service {
                 broadcastUsageData();
                 
                 // Check screen time limits and show notifications if needed
-                checkScreenTimeLimit(totalMinutes);
+                //checkScreenTimeLimit(totalMinutes);
             } else {
                 Log.d(TAG, "No significant change in screen time, skipping update");
             }
@@ -378,150 +379,6 @@ public class BackgroundService extends Service {
             
         } catch (Exception e) {
             Log.e(TAG, "Error broadcasting usage data", e);
-        }
-    }
-
-    private void checkScreenTimeLimit(float totalMinutes) {
-        try {
-            // Get screen time limit from SharedPreferences
-            SharedPreferences prefs = getSharedPreferences("ScreenTimeReminder", MODE_PRIVATE);
-            int screenTimeLimit = prefs.getInt("screenTimeLimit", 60); // Default 60 minutes
-            
-            // Get current time for notification tracking
-            long currentTime = System.currentTimeMillis();
-            
-            // Get last notification times
-            long lastLimitReachedNotification = prefs.getLong("lastLimitReachedNotification", 0);
-            long lastApproachingLimitNotification = prefs.getLong("lastApproachingLimitNotification", 0);
-            
-            // Define cooldown period (1 minute in milliseconds)
-            long NOTIFICATION_COOLDOWN = 60 * 1000;
-            
-            // Calculate remaining minutes and percentage
-            float remainingMinutes = Math.max(0, screenTimeLimit - totalMinutes);
-            float percentageUsed = (totalMinutes / screenTimeLimit) * 100;
-            
-            // Check if enough time has passed since last notifications
-            boolean canShowLimitReached = (currentTime - lastLimitReachedNotification) >= NOTIFICATION_COOLDOWN;
-            boolean canShowApproaching = (currentTime - lastApproachingLimitNotification) >= NOTIFICATION_COOLDOWN;
-            
-            Log.d(TAG, String.format("Checking screen time limit - Total: %.2f, Limit: %d, Remaining: %.2f, Percentage: %.1f%%, CanShowLimit: %b, CanShowApproaching: %b",
-                totalMinutes, screenTimeLimit, remainingMinutes, percentageUsed, canShowLimitReached, canShowApproaching));
-            
-            // First check if limit is reached
-            if (totalMinutes >= screenTimeLimit && canShowLimitReached) {
-                Log.d(TAG, "Showing limit reached notification");
-                showNotification("Screen Time Limit Reached", 
-                    "You have reached your daily screen time limit of " + screenTimeLimit + " minutes.");
-                prefs.edit().putLong("lastLimitReachedNotification", currentTime).apply();
-            } 
-            // Only show approaching limit if we haven't reached the limit yet
-            else if (totalMinutes < screenTimeLimit && percentageUsed >= 80 && canShowApproaching) {
-                Log.d(TAG, "Showing approaching limit notification");
-                showNotification("Approaching Screen Time Limit", 
-                    "You have " + Math.round(remainingMinutes) + " minutes remaining (" + Math.round(percentageUsed) + "% of limit used).");
-                prefs.edit().putLong("lastApproachingLimitNotification", currentTime).apply();
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error checking screen time limit", e);
-        }
-    }
-
-    private void showNotification(String title, String message) {
-        try {
-            // Get current total screen time from shared preferences
-            SharedPreferences prefs = getSharedPreferences("ScreenTimeReminder", MODE_PRIVATE);
-            float totalScreenTime = prefs.getFloat("totalScreenTime", 0);
-            
-            // Format the time
-            int hours = (int) (totalScreenTime / 60);
-            int minutes = (int) (totalScreenTime % 60);
-            String timeString = String.format("%d hours %d minutes", hours, minutes);
-            
-            // Create the notification message
-            String notificationMessage = String.format("%s\nCurrent screen time: %s", message, timeString);
-            
-            NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-            
-            // Clear all previous notifications
-            notificationManager.cancelAll();
-            
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                NotificationChannel channel = new NotificationChannel(
-                    "screen_time_channel",
-                    "Screen Time Notifications",
-                    NotificationManager.IMPORTANCE_HIGH
-                );
-                channel.setDescription("Notifications for screen time limits");
-                channel.enableLights(true);
-                channel.enableVibration(true);
-                channel.setShowBadge(true);
-                channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-                channel.setImportance(NotificationManager.IMPORTANCE_HIGH);
-                notificationManager.createNotificationChannel(channel);
-            }
-            
-            // Create an intent for when the notification is tapped
-            Intent intent = new Intent(this, MainActivity.class);
-            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            PendingIntent pendingIntent = PendingIntent.getActivity(
-                this,
-                0,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-            );
-            
-            // Determine notification ID based on the type of notification
-            int notificationId = NOTIFICATION_ID_BACKGROUND_SERVICE;
-            if (title.contains("Limit Reached")) {
-                notificationId = NOTIFICATION_ID_LIMIT_REACHED;
-            } else if (title.contains("Approaching")) {
-                notificationId = NOTIFICATION_ID_APPROACHING_LIMIT;
-            }
-            
-            NotificationCompat.Builder builder = new NotificationCompat.Builder(this, "screen_time_channel")
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle(title)
-                .setContentText(notificationMessage)
-                .setStyle(new NotificationCompat.BigTextStyle().bigText(notificationMessage))
-                .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setAutoCancel(false)
-                .setOngoing(true)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .setCategory(NotificationCompat.CATEGORY_ALARM)
-                .setDefaults(NotificationCompat.DEFAULT_ALL)
-                .setOnlyAlertOnce(false)
-                .setContentIntent(pendingIntent)
-                .setFullScreenIntent(pendingIntent, true)
-                .setColor(getResources().getColor(android.R.color.holo_red_dark))
-                .setTicker(notificationMessage)
-                .setWhen(System.currentTimeMillis())
-                .setShowWhen(true)
-                .setUsesChronometer(true)
-                .setChronometerCountDown(false)
-                .setTimeoutAfter(0); // Never timeout
-            
-            // Add action buttons
-            Intent dismissIntent = new Intent(this, MainActivity.class);
-            dismissIntent.setAction("DISMISS_NOTIFICATION");
-            PendingIntent dismissPendingIntent = PendingIntent.getActivity(
-                this,
-                1,
-                dismissIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-            );
-            
-            builder.addAction(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                "Dismiss",
-                dismissPendingIntent
-            );
-            
-            // Show the notification with the appropriate ID
-            notificationManager.notify(notificationId, builder.build());
-            Log.d(TAG, "Showing notification with ID " + notificationId + ": " + notificationMessage);
-        } catch (Exception e) {
-            Log.e(TAG, "Error showing notification", e);
         }
     }
 

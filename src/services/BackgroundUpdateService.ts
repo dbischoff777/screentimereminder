@@ -170,49 +170,100 @@ class BackgroundUpdateService {
 
   private checkAndTriggerNotifications(prefs: any) {
     try {
-      const totalMinutes = prefs.totalScreenTime;
-      const screenTimeLimit = prefs.screenTimeLimit;
-      const lastLimitReached = prefs.lastLimitReachedNotification;
-      const lastApproachingLimit = prefs.lastApproachingLimitNotification;
+      // Validate input data
+      if (!prefs || typeof prefs !== 'object') {
+        console.error('Invalid preferences data received:', prefs);
+        return;
+      }
+
+      const totalMinutes = parseFloat(prefs.totalScreenTime) || 0;
+      const screenTimeLimit = parseInt(prefs.screenTimeLimit) || 60;
+      const lastLimitReached = parseInt(prefs.lastLimitReachedNotification) || 0;
+      const lastApproachingLimit = parseInt(prefs.lastApproachingLimitNotification) || 0;
       
+      // Validate numeric values
+      if (isNaN(totalMinutes) || isNaN(screenTimeLimit) || 
+          isNaN(lastLimitReached) || isNaN(lastApproachingLimit)) {
+        console.error('Invalid numeric values in preferences:', prefs);
+        return;
+      }
+
       const currentTime = Date.now();
       const NOTIFICATION_COOLDOWN = 60 * 1000; // 1 minute cooldown
       
-      // Calculate remaining minutes and percentage
+      // Calculate remaining minutes and percentage with validation
       const remainingMinutes = Math.max(0, screenTimeLimit - totalMinutes);
-      const percentageUsed = (totalMinutes / screenTimeLimit) * 100;
+      const percentageUsed = Math.min(100, Math.max(0, (totalMinutes / screenTimeLimit) * 100));
       
       // Check if enough time has passed since last notifications
       const canShowLimitReached = (currentTime - lastLimitReached) >= NOTIFICATION_COOLDOWN;
       const canShowApproaching = (currentTime - lastApproachingLimit) >= NOTIFICATION_COOLDOWN;
       
+      // Log detailed information for debugging
       console.log('Checking notifications:', {
         totalMinutes,
         screenTimeLimit,
         remainingMinutes,
         percentageUsed,
         canShowLimitReached,
-        canShowApproaching
+        canShowApproaching,
+        timeSinceLastLimit: currentTime - lastLimitReached,
+        timeSinceLastApproaching: currentTime - lastApproachingLimit
       });
       
       // First check if limit is reached
       if (totalMinutes >= screenTimeLimit && canShowLimitReached) {
         console.log('Triggering limit reached notification');
-        // Trigger notification through native code
-        AppUsageTracker.startTracking().catch(error => {
-          console.error('Error triggering notification:', error);
+        this.triggerNotification('limitReached').catch(error => {
+          console.error('Error triggering limit reached notification:', error);
         });
       } 
-      // Only show approaching limit if we haven't reached the limit yet
+      // Only show approaching limit if we haven't reached the limit yet and percentage is >= 80%
       else if (totalMinutes < screenTimeLimit && percentageUsed >= 80 && canShowApproaching) {
         console.log('Triggering approaching limit notification');
-        // Trigger notification through native code
-        AppUsageTracker.startTracking().catch(error => {
-          console.error('Error triggering notification:', error);
+        this.triggerNotification('approaching').catch(error => {
+          console.error('Error triggering approaching limit notification:', error);
         });
       }
     } catch (error) {
       console.error('Error checking notifications:', error);
+      // Attempt to recover by restarting the background service
+      this.restartBackgroundService().catch(err => {
+        console.error('Failed to restart background service:', err);
+      });
+    }
+  }
+
+  private async triggerNotification(type: 'limitReached' | 'approaching'): Promise<void> {
+    try {
+      // Start tracking to trigger the native notification
+      await AppUsageTracker.startTracking();
+      
+      // Log the notification trigger
+      console.log(`Successfully triggered ${type} notification`);
+    } catch (error) {
+      console.error(`Error triggering ${type} notification:`, error);
+      throw error;
+    }
+  }
+
+  private async restartBackgroundService(): Promise<void> {
+    try {
+      console.log('Attempting to restart background service');
+      
+      // Stop current tracking
+      await AppUsageTracker.stopTracking();
+      
+      // Wait a moment before restarting
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Start tracking again
+      await AppUsageTracker.startTracking();
+      
+      console.log('Successfully restarted background service');
+    } catch (error) {
+      console.error('Error restarting background service:', error);
+      throw error;
     }
   }
 

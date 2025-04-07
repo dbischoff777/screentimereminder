@@ -443,7 +443,7 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
               
               console.log('Notification channel created successfully');
               
-              // Test notification to verify channel
+              /* // Test notification to verify channel
               await LocalNotifications.schedule({
                 notifications: [{
                   title: 'Screen Time Reminder',
@@ -459,7 +459,7 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
                   actionTypeId: '',
                   extra: null
                 }]
-              });
+              }); */
             } catch (channelError) {
               console.error('Error creating notification channel:', channelError);
             }
