@@ -196,6 +196,7 @@ const Settings = () => {
         </Title>
         <CustomDropdown
           options={[
+            { value: '1', label: '1m' },
             { value: '30', label: '30m' },
             { value: '60', label: '1h' },
             { value: '120', label: '2h' },

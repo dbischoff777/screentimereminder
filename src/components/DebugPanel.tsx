@@ -189,7 +189,7 @@ const DebugPanel = () => {
     };
 
     checkNotificationStatus();
-    const interval = setInterval(checkNotificationStatus, 1000);
+    const interval = setInterval(checkNotificationStatus, 30000);
     return () => clearInterval(interval);
   }, []);
 

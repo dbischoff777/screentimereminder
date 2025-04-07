@@ -144,14 +144,23 @@ class BackgroundUpdateService {
       try {
         // Get latest shared preferences from system
         const prefs = await AppUsageTracker.getSharedPreferences();
-        this.sharedPreferences = prefs;
-        console.log('Updated shared preferences from system:', prefs);
         
-        // Check if we need to show notifications based on updated data
-        this.checkAndTriggerNotifications(prefs);
-        
-        if (this.updateCallback) {
-          this.updateCallback();
+        // Only update if there's a significant change
+        if (this.sharedPreferences?.totalScreenTime !== prefs.totalScreenTime) {
+          console.log('Significant change detected in screen time:', {
+            old: this.sharedPreferences?.totalScreenTime,
+            new: prefs.totalScreenTime
+          });
+          
+          this.sharedPreferences = prefs;
+          console.log('Updated shared preferences from system:', prefs);
+          
+          // Check if we need to show notifications based on updated data
+          this.checkAndTriggerNotifications(prefs);
+          
+          if (this.updateCallback) {
+            this.updateCallback();
+          }
         }
       } catch (error) {
         console.error('Error in background update:', error);
@@ -163,7 +172,6 @@ class BackgroundUpdateService {
     try {
       const totalMinutes = prefs.totalScreenTime;
       const screenTimeLimit = prefs.screenTimeLimit;
-      const notificationFrequency = prefs.notificationFrequency;
       const lastLimitReached = prefs.lastLimitReachedNotification;
       const lastApproachingLimit = prefs.lastApproachingLimitNotification;
       
@@ -173,6 +181,9 @@ class BackgroundUpdateService {
       // Calculate remaining minutes
       const remainingMinutes = Math.max(0, screenTimeLimit - totalMinutes);
       
+      // Calculate percentage of limit used
+      const percentageUsed = (totalMinutes / screenTimeLimit) * 100;
+      
       // Check if enough time has passed since last notifications
       const canShowLimitReached = (currentTime - lastLimitReached) >= NOTIFICATION_COOLDOWN;
       const canShowApproaching = (currentTime - lastApproachingLimit) >= NOTIFICATION_COOLDOWN;
@@ -181,6 +192,7 @@ class BackgroundUpdateService {
         totalMinutes,
         screenTimeLimit,
         remainingMinutes,
+        percentageUsed,
         canShowLimitReached,
         canShowApproaching
       });
@@ -191,7 +203,7 @@ class BackgroundUpdateService {
         AppUsageTracker.startTracking().catch(error => {
           console.error('Error triggering notification:', error);
         });
-      } else if (remainingMinutes <= notificationFrequency && remainingMinutes > 0 && canShowApproaching) {
+      } else if (percentageUsed >= 80 && remainingMinutes > 0 && canShowApproaching) {
         console.log('Triggering approaching limit notification');
         // Trigger notification through native code
         AppUsageTracker.startTracking().catch(error => {

@@ -276,67 +276,75 @@ public class BackgroundService extends Service {
         try {
             Log.d(TAG, "Starting app usage update check");
             long currentTime = System.currentTimeMillis();
-            long startTime = lastUpdateTime > 0 ? lastUpdateTime : currentTime - UPDATE_INTERVAL;
             
-            UsageEvents usageEvents = usageStatsManager.queryEvents(startTime, currentTime);
-            UsageEvents.Event event = new UsageEvents.Event();
+            // Get the start of today
+            Calendar calendar = Calendar.getInstance();
+            calendar.set(Calendar.HOUR_OF_DAY, 0);
+            calendar.set(Calendar.MINUTE, 0);
+            calendar.set(Calendar.SECOND, 0);
+            calendar.set(Calendar.MILLISECOND, 0);
+            long startOfDay = calendar.getTimeInMillis();
             
-            Log.d(TAG, String.format("Querying usage events from %d to %d", startTime, currentTime));
-            
-            while (usageEvents.hasNextEvent()) {
-                usageEvents.getNextEvent(event);
-                if (event.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND) {
-                    String packageName = event.getPackageName();
-                    Log.d(TAG, "App moved to foreground: " + packageName);
-                    
-                    // Update usage time for the previous app
-                    if (!lastForegroundApp.isEmpty() && !lastForegroundApp.equals(packageName)) {
-                        long timeSpent = currentTime - lastUpdateTime;
-                        updateAppUsageTime(lastForegroundApp, timeSpent);
-                        Log.d(TAG, String.format("Updated usage for %s: %d ms", lastForegroundApp, timeSpent));
-                    }
-                    
-                    lastForegroundApp = packageName;
-                    lastUpdateTime = currentTime;
-                }
-            }
-            
-            // Update the current app's usage time
-            if (!lastForegroundApp.isEmpty()) {
-                long timeSpent = currentTime - lastUpdateTime;
-                updateAppUsageTime(lastForegroundApp, timeSpent);
-                Log.d(TAG, String.format("Updated current app %s: %d ms", lastForegroundApp, timeSpent));
-                lastUpdateTime = currentTime;
-            }
-            
-            // Calculate total screen time and update shared preferences
-            long totalTime = 0;
+            // Query for today's usage stats
             Map<String, UsageStats> stats = usageStatsManager.queryAndAggregateUsageStats(
-                getStartOfDay(),
-                System.currentTimeMillis()
+                startOfDay,
+                currentTime
             );
             
-            if (stats != null) {
-                for (UsageStats usageStats : stats.values()) {
-                    if (!isSystemApp(usageStats.getPackageName())) {
-                        totalTime += usageStats.getTotalTimeInForeground();
-                    }
+            if (stats == null || stats.isEmpty()) {
+                Log.w(TAG, "No usage stats available for today");
+                return;
+            }
+            
+            // Calculate total time excluding our own app and system apps
+            long totalTime = 0;
+            String ourPackage = getPackageName();
+            
+            for (Map.Entry<String, UsageStats> entry : stats.entrySet()) {
+                String packageName = entry.getKey();
+                UsageStats usageStats = entry.getValue();
+                
+                // Skip our own app and system apps
+                if (packageName.equals(ourPackage) || isSystemApp(packageName)) {
+                    continue;
+                }
+                
+                // Only count time from today
+                long timeInForeground = usageStats.getTotalTimeInForeground();
+                if (usageStats.getFirstTimeStamp() >= startOfDay) {
+                    totalTime += timeInForeground;
+                } else {
+                    // For apps that started before today, only count time from start of day
+                    totalTime += Math.max(0, timeInForeground - (startOfDay - usageStats.getFirstTimeStamp()));
                 }
             }
             
-            // Convert to minutes and update shared preferences
+            // Convert to minutes
             float totalMinutes = totalTime / (1000f * 60f);
+            
+            // Get current shared preferences
             SharedPreferences prefs = getSharedPreferences("ScreenTimeReminder", MODE_PRIVATE);
-            prefs.edit()
-                .putFloat("totalScreenTime", totalMinutes)
-                .putLong("lastUpdateTime", System.currentTimeMillis())
-                .apply();
+            float currentTotalMinutes = prefs.getFloat("totalScreenTime", 0);
             
-            Log.d(TAG, String.format("Updated total screen time: %.2f minutes", totalMinutes));
-            
-            // Broadcast the updated usage data
-            broadcastUsageData();
-            
+            // Only update if there's a significant change (more than 1 minute)
+            if (Math.abs(totalMinutes - currentTotalMinutes) >= 1) {
+                Log.d(TAG, String.format("Updating total screen time: %.2f minutes (was %.2f)", 
+                    totalMinutes, currentTotalMinutes));
+                
+                // Update shared preferences
+                prefs.edit()
+                    .putFloat("totalScreenTime", totalMinutes)
+                    .putLong("lastUpdateTime", currentTime)
+                    .apply();
+                
+                // Broadcast the update
+                broadcastUsageData();
+                
+                // Check screen time limits and show notifications if needed
+                checkScreenTimeLimit(totalMinutes);
+            } else {
+                Log.d(TAG, "No significant change in screen time, skipping update");
+            }
         } catch (Exception e) {
             Log.e(TAG, "Error updating app usage", e);
         }
@@ -393,22 +401,26 @@ public class BackgroundService extends Service {
             // Calculate remaining minutes
             int remainingMinutes = Math.max(0, screenTimeLimit - (int)totalMinutes);
             
+            // Calculate percentage of limit used
+            float percentageUsed = (totalMinutes / screenTimeLimit) * 100;
+            
             // Check if enough time has passed since last notifications
             boolean canShowLimitReached = (currentTime - lastLimitReachedNotification) >= NOTIFICATION_COOLDOWN;
             boolean canShowApproaching = (currentTime - lastApproachingLimitNotification) >= NOTIFICATION_COOLDOWN;
             
-            Log.d(TAG, String.format("Checking screen time limit - Total: %.2f, Limit: %d, Remaining: %d, CanShowLimit: %b, CanShowApproaching: %b",
-                totalMinutes, screenTimeLimit, remainingMinutes, canShowLimitReached, canShowApproaching));
+            Log.d(TAG, String.format("Checking screen time limit - Total: %.2f, Limit: %d, Remaining: %d, Percentage: %.1f%%, CanShowLimit: %b, CanShowApproaching: %b",
+                totalMinutes, screenTimeLimit, remainingMinutes, percentageUsed, canShowLimitReached, canShowApproaching));
             
             if (totalMinutes >= screenTimeLimit && canShowLimitReached) {
                 Log.d(TAG, "Showing limit reached notification");
                 showNotification("Screen Time Limit Reached", 
                     "You have reached your daily screen time limit of " + screenTimeLimit + " minutes.");
                 prefs.edit().putLong("lastLimitReachedNotification", currentTime).apply();
-            } else if (remainingMinutes <= notificationFrequency && remainingMinutes > 0 && canShowApproaching) {
+            } else if (percentageUsed >= 80 && remainingMinutes > 0 && canShowApproaching) {
+                // Show approaching limit notification when 80% of limit is reached
                 Log.d(TAG, "Showing approaching limit notification");
                 showNotification("Approaching Screen Time Limit", 
-                    "You have " + remainingMinutes + " minutes remaining.");
+                    "You have " + remainingMinutes + " minutes remaining (" + Math.round(percentageUsed) + "% of limit used).");
                 prefs.edit().putLong("lastApproachingLimitNotification", currentTime).apply();
             }
         } catch (Exception e) {
@@ -418,34 +430,13 @@ public class BackgroundService extends Service {
 
     private void showNotification(String title, String message) {
         try {
-            // Get the latest screen time data
-            long totalTime = 0;
-            Map<String, UsageStats> stats = usageStatsManager.queryAndAggregateUsageStats(
-                getStartOfDay(),
-                System.currentTimeMillis()
-            );
-            
-            if (stats != null) {
-                for (UsageStats usageStats : stats.values()) {
-                    if (!isSystemApp(usageStats.getPackageName())) {
-                        totalTime += usageStats.getTotalTimeInForeground();
-                    }
-                }
-            }
-            
-            // Convert to minutes
-            float totalMinutes = totalTime / (1000f * 60f);
-            
-            // Update shared preferences with latest data
+            // Get current total screen time from shared preferences
             SharedPreferences prefs = getSharedPreferences("ScreenTimeReminder", MODE_PRIVATE);
-            prefs.edit()
-                .putFloat("totalScreenTime", totalMinutes)
-                .putLong("lastUpdateTime", System.currentTimeMillis())
-                .apply();
+            float totalScreenTime = prefs.getFloat("totalScreenTime", 0);
             
             // Format the time
-            int hours = (int) (totalMinutes / 60);
-            int minutes = (int) (totalMinutes % 60);
+            int hours = (int) (totalScreenTime / 60);
+            int minutes = (int) (totalScreenTime % 60);
             String timeString = String.format("%d hours %d minutes", hours, minutes);
             
             // Create the notification message
