@@ -178,10 +178,8 @@ class BackgroundUpdateService {
       const currentTime = Date.now();
       const NOTIFICATION_COOLDOWN = 60 * 1000; // 1 minute cooldown
       
-      // Calculate remaining minutes
+      // Calculate remaining minutes and percentage
       const remainingMinutes = Math.max(0, screenTimeLimit - totalMinutes);
-      
-      // Calculate percentage of limit used
       const percentageUsed = (totalMinutes / screenTimeLimit) * 100;
       
       // Check if enough time has passed since last notifications
@@ -197,13 +195,16 @@ class BackgroundUpdateService {
         canShowApproaching
       });
       
+      // First check if limit is reached
       if (totalMinutes >= screenTimeLimit && canShowLimitReached) {
         console.log('Triggering limit reached notification');
         // Trigger notification through native code
         AppUsageTracker.startTracking().catch(error => {
           console.error('Error triggering notification:', error);
         });
-      } else if (percentageUsed >= 80 && remainingMinutes > 0 && canShowApproaching) {
+      } 
+      // Only show approaching limit if we haven't reached the limit yet
+      else if (totalMinutes < screenTimeLimit && percentageUsed >= 80 && canShowApproaching) {
         console.log('Triggering approaching limit notification');
         // Trigger notification through native code
         AppUsageTracker.startTracking().catch(error => {
