@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import AppUsageTracker from '../services/AppUsageTracker';
 import { FiBarChart2, FiSettings, FiBell } from 'react-icons/fi';
-import DebugPanel from '../components/DebugPanel';
+import TipsSection from '../components/TipsSection';
 
 // Welcome messages array
 const welcomeMessages = [
@@ -278,22 +278,11 @@ const Home = () => {
             Enable Usage Access in Settings
           </Button>
         </Box>
+
+        {/* Tips Section */}
+        <TipsSection />
       </Box>
-      {/* Debug Panel Section */}
-      <Box mt="xl">
-        <Divider 
-          my="md" 
-          label={
-            <Text size="sm" style={{ color: '#FF00FF' }}>
-              <FiBarChart2 style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
-              System Status
-            </Text>
-          } 
-          labelPosition="center"
-          style={{ borderColor: '#FF00FF' }}
-        />
-        <DebugPanel />
-      </Box>
+
       {/* Version Display */}
       <Box
         style={{
