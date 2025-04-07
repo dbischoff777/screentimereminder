@@ -418,13 +418,34 @@ public class BackgroundService extends Service {
 
     private void showNotification(String title, String message) {
         try {
-            // Get current total screen time
+            // Get the latest screen time data
+            long totalTime = 0;
+            Map<String, UsageStats> stats = usageStatsManager.queryAndAggregateUsageStats(
+                getStartOfDay(),
+                System.currentTimeMillis()
+            );
+            
+            if (stats != null) {
+                for (UsageStats usageStats : stats.values()) {
+                    if (!isSystemApp(usageStats.getPackageName())) {
+                        totalTime += usageStats.getTotalTimeInForeground();
+                    }
+                }
+            }
+            
+            // Convert to minutes
+            float totalMinutes = totalTime / (1000f * 60f);
+            
+            // Update shared preferences with latest data
             SharedPreferences prefs = getSharedPreferences("ScreenTimeReminder", MODE_PRIVATE);
-            float totalScreenTime = prefs.getFloat("totalScreenTime", 0);
+            prefs.edit()
+                .putFloat("totalScreenTime", totalMinutes)
+                .putLong("lastUpdateTime", System.currentTimeMillis())
+                .apply();
             
             // Format the time
-            int hours = (int) (totalScreenTime / 60);
-            int minutes = (int) (totalScreenTime % 60);
+            int hours = (int) (totalMinutes / 60);
+            int minutes = (int) (totalMinutes % 60);
             String timeString = String.format("%d hours %d minutes", hours, minutes);
             
             // Create the notification message
