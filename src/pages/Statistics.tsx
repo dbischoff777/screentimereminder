@@ -120,16 +120,20 @@ const Statistics = () => {
       .sort((a, b) => b.time - a.time);
     
     // If we have too many apps, only show the top ones that make up 95% of usage
-    if (allApps.length > 10) {
+    // or have at least 1% usage time
+    if (allApps.length > 10) {  // Increased from 10 to 15 max apps
       let accumulatedPercentage = 0;
       return allApps.filter(app => {
         const percentage = (app.time / totalTime) * 100;
         accumulatedPercentage += percentage;
-        return accumulatedPercentage <= 95;  // Show apps until we reach 95% of total usage
+        // Show apps that either:
+        // 1. Contribute to the first 95% of usage OR
+        // 2. Have at least 1% usage time
+        return accumulatedPercentage <= 95 || percentage >= 1;
       });
     }
     
-    return allApps;  // Show all apps if we have 10 or fewer
+    return allApps;  // Show all apps if we have 15 or fewer
   };
 
   const sortedApps = getFilteredApps();
