@@ -69,12 +69,13 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
                 Log.d(TAG, entry.getKey() + ": " + entry.getValue() + " (" + (entry.getValue() != null ? entry.getValue().getClass().getSimpleName() : "null") + ")");
             }
             
+            // Get total screen time and limit using AppUsageTracker's static methods
             float totalScreenTime = prefs.getFloat(KEY_TOTAL_SCREEN_TIME, 0f);
-            long screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, 1L); // Default to 1 minute
+            int screenTimeLimit = AppUsageTracker.getScreenTimeLimitStatic(context);
 
             // Format the time values
             String usedTimeText = String.format("Used: %s", formatTime(Math.round(totalScreenTime)));
-            String limitText = String.format("%s", formatTime((int)screenTimeLimit));
+            String limitText = String.format("%s", formatTime(screenTimeLimit));
 
             // Calculate progress percentage (capped at 100%)
             int progressPercent = Math.min((int)((totalScreenTime * 100.0f) / screenTimeLimit), 100);
