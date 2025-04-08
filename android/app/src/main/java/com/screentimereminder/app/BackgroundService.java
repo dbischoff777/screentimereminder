@@ -8,6 +8,8 @@ import android.app.Service;
 import android.app.usage.UsageEvents;
 import android.app.usage.UsageStats;
 import android.app.usage.UsageStatsManager;
+import android.appwidget.AppWidgetManager;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -33,6 +35,7 @@ import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutorService;
 
 import org.json.JSONObject;
 
@@ -59,6 +62,10 @@ public class BackgroundService extends Service {
     private Map<String, Long> appUsageMap = new HashMap<>();
     private Runnable updateRunnable;
     private Runnable watchdogRunnable;
+
+    private final ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor();
+    private final Object updateLock = new Object();
+    private volatile boolean isUpdating = false;
 
     public class LocalBinder extends Binder {
         BackgroundService getService() {
@@ -274,81 +281,95 @@ public class BackgroundService extends Service {
     }
 
     private void updateAppUsage() {
-        try {
-            Log.d(TAG, "Starting app usage update check");
-            long currentTime = System.currentTimeMillis();
-            
-            // Get the start of today
-            Calendar calendar = Calendar.getInstance();
-            calendar.set(Calendar.HOUR_OF_DAY, 0);
-            calendar.set(Calendar.MINUTE, 0);
-            calendar.set(Calendar.SECOND, 0);
-            calendar.set(Calendar.MILLISECOND, 0);
-            long startOfDay = calendar.getTimeInMillis();
-            
-            // Query for today's usage stats
-            Map<String, UsageStats> stats = usageStatsManager.queryAndAggregateUsageStats(
-                startOfDay,
-                currentTime
-            );
-            
-            if (stats == null || stats.isEmpty()) {
-                Log.w(TAG, "No usage stats available for today");
-                return;
-            }
-            
-            // Calculate total time excluding our own app and system apps
-            long totalTime = 0;
-            String ourPackage = getPackageName();
-            
-            for (Map.Entry<String, UsageStats> entry : stats.entrySet()) {
-                String packageName = entry.getKey();
-                UsageStats usageStats = entry.getValue();
-                
-                // Skip our own app and system apps
-                if (packageName.equals(ourPackage) || isSystemApp(packageName)) {
-                    continue;
-                }
-                
-                // Only count time from today
-                long timeInForeground = usageStats.getTotalTimeInForeground();
-                if (usageStats.getFirstTimeStamp() >= startOfDay) {
-                    totalTime += timeInForeground;
-                } else {
-                    // For apps that started before today, only count time from start of day
-                    totalTime += Math.max(0, timeInForeground - (startOfDay - usageStats.getFirstTimeStamp()));
-                }
-            }
-            
-            // Convert to minutes
-            float totalMinutes = totalTime / (1000f * 60f);
-            
-            // Get current shared preferences
-            SharedPreferences prefs = getSharedPreferences("ScreenTimeReminder", MODE_PRIVATE);
-            float currentTotalMinutes = prefs.getFloat("totalScreenTime", 0);
-            
-            // Only update if there's a significant change (more than 1 minute)
-            if (Math.abs(totalMinutes - currentTotalMinutes) >= 1) {
-                Log.d(TAG, String.format("Updating total screen time: %.2f minutes (was %.2f)", 
-                    totalMinutes, currentTotalMinutes));
-                
-                // Update shared preferences
-                prefs.edit()
-                    .putFloat("totalScreenTime", totalMinutes)
-                    .putLong("lastUpdateTime", currentTime)
-                    .apply();
-                
-                // Broadcast the update
-                broadcastUsageData();
-                
-                // Check screen time limits and show notifications if needed
-                //checkScreenTimeLimit(totalMinutes);
-            } else {
-                Log.d(TAG, "No significant change in screen time, skipping update");
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error updating app usage", e);
+        if (isUpdating) {
+            Log.d(TAG, "Update already in progress, skipping");
+            return;
         }
+
+        synchronized (updateLock) {
+            if (isUpdating) return;
+            isUpdating = true;
+        }
+
+        backgroundExecutor.execute(() -> {
+            try {
+                // Get start of day
+                Calendar calendar = Calendar.getInstance();
+                calendar.set(Calendar.HOUR_OF_DAY, 0);
+                calendar.set(Calendar.MINUTE, 0);
+                calendar.set(Calendar.SECOND, 0);
+                calendar.set(Calendar.MILLISECOND, 0);
+                long startTime = calendar.getTimeInMillis();
+                long endTime = System.currentTimeMillis();
+
+                // Query usage stats for today only
+                Map<String, UsageStats> stats = usageStatsManager.queryAndAggregateUsageStats(startTime, endTime);
+                if (stats == null || stats.isEmpty()) {
+                    Log.w(TAG, "No usage stats available for today");
+                    return;
+                }
+
+                // Calculate total time excluding system apps and our own app
+                long totalTimeInForeground = 0;
+                String ourPackage = getPackageName();
+                
+                for (Map.Entry<String, UsageStats> entry : stats.entrySet()) {
+                    String packageName = entry.getKey();
+                    UsageStats usageStats = entry.getValue();
+
+                    if (!packageName.equals(ourPackage) && !isSystemApp(packageName)) {
+                        totalTimeInForeground += usageStats.getTotalTimeInForeground();
+                    }
+                }
+
+                // Convert to minutes
+                int totalMinutes = (int) (totalTimeInForeground / (60 * 1000));
+                
+                // Get screen time limit
+                SharedPreferences prefs = getSharedPreferences("ScreenTimeReminder", MODE_PRIVATE);
+                long screenTimeLimit = prefs.getLong("screenTimeLimit", 60);
+
+                // Store the calculated value
+                prefs.edit()
+                    .putInt("totalScreenTime", totalMinutes)
+                    .putLong("lastUpdateTime", System.currentTimeMillis())
+                    .apply();
+
+                // Create JSON object with the data
+                final JSONObject data = new JSONObject();
+                data.put("totalScreenTime", totalMinutes);
+                data.put("screenTimeLimit", screenTimeLimit);
+                data.put("timestamp", System.currentTimeMillis());
+
+                // Post updates to main thread
+                mainHandler.post(() -> {
+                    try {
+                        // Broadcast the update
+                        Intent intent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
+                        intent.putExtra("usageData", data.toString());
+                        sendBroadcast(intent);
+
+                        // Update widget
+                        Intent updateWidgetIntent = new Intent(this, ScreenTimeWidgetProvider.class);
+                        updateWidgetIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
+                        int[] ids = AppWidgetManager.getInstance(this)
+                            .getAppWidgetIds(new ComponentName(this, ScreenTimeWidgetProvider.class));
+                        updateWidgetIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+                        sendBroadcast(updateWidgetIntent);
+
+                        Log.d(TAG, "App usage updated - Total: " + totalMinutes + " minutes, Limit: " + screenTimeLimit + " minutes");
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error broadcasting updates", e);
+                    }
+                });
+            } catch (Exception e) {
+                Log.e(TAG, "Error updating app usage", e);
+            } finally {
+                synchronized (updateLock) {
+                    isUpdating = false;
+                }
+            }
+        });
     }
 
     private void updateAppUsageTime(String packageName, long timeSpent) {
@@ -362,7 +383,7 @@ public class BackgroundService extends Service {
             
             // Get the latest total screen time from shared preferences
             SharedPreferences prefs = getSharedPreferences("ScreenTimeReminder", MODE_PRIVATE);
-            float totalMinutes = prefs.getFloat("totalScreenTime", 0);
+            int totalMinutes = prefs.getInt("totalScreenTime", 0);
             long lastUpdate = prefs.getLong("lastUpdateTime", 0);
             
             // Create a JSON object with the usage data
@@ -411,6 +432,18 @@ public class BackgroundService extends Service {
             if (watchdogRunnable != null) {
                 mainHandler.removeCallbacks(watchdogRunnable);
                 Log.d(TAG, "Removed watchdog runnable");
+            }
+            
+            // Shutdown executor
+            if (backgroundExecutor != null && !backgroundExecutor.isShutdown()) {
+                backgroundExecutor.shutdown();
+                try {
+                    if (!backgroundExecutor.awaitTermination(1, TimeUnit.SECONDS)) {
+                        backgroundExecutor.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    backgroundExecutor.shutdownNow();
+                }
             }
             
             // Release wake lock safely

@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { Container, Title, Text, Button, Divider, Box, Group } from '@mantine/core';
+import { Container, Title, Text, Button, Divider, Box } from '@mantine/core';
 import { useNavigate } from 'react-router-dom';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import AppUsageTracker from '../services/AppUsageTracker';
-import { FiBarChart2, FiSettings, FiBell } from 'react-icons/fi';
+import { FiBarChart2, FiSettings } from 'react-icons/fi';
 import TipsSection from '../components/TipsSection';
+//import { WidgetService } from '../services/WidgetService';
 
 // Welcome messages array
 const welcomeMessages = [
@@ -19,13 +20,14 @@ const Home = () => {
   const navigate = useNavigate();
   const [welcomeMessage, setWelcomeMessage] = useState('');
   const [appVersion, setAppVersion] = useState('');
-  const { usageAccessEnabled, screenTimeLimit, notificationFrequency, getTotalScreenTime } = useScreenTime();
+  const { usageAccessEnabled, screenTimeLimit, getTotalScreenTime } = useScreenTime();
+  //const widgetService = WidgetService.getInstance();
   
   // Get the tracker service instance
   const trackerService = AppUsageTracker.getInstance();
 
   // Test notification function
-  const testNotification = async () => {
+  /* const testNotification = async () => {
     try {
       const { LocalNotifications } = await import('@capacitor/local-notifications');
       
@@ -58,10 +60,11 @@ const Home = () => {
     } catch (error) {
       console.error('Error scheduling test notification:', error);
     }
-  };
+  }; */
 
   // Test function to simulate reaching notification threshold
-  const testNotificationThreshold = async () => {
+  /* 
+  
     try {
       const { LocalNotifications } = await import('@capacitor/local-notifications');
       
@@ -137,7 +140,7 @@ const Home = () => {
       console.error('Error scheduling test threshold notifications:', error);
     }
   };
-
+ */
   useEffect(() => {
     // Select a random welcome message
     const randomIndex = Math.floor(Math.random() * welcomeMessages.length);
@@ -167,7 +170,19 @@ const Home = () => {
     };
     
     checkUsagePermission();
-  }, [usageAccessEnabled]);
+
+    // Update widget data when screen time changes
+    /* const updateWidget = async () => {
+      const totalTime = getTotalScreenTime();
+      console.log('Home: Updating widget with data:', { totalTime, screenTimeLimit });
+      await widgetService.updateWidgetData(Math.round(totalTime), screenTimeLimit);
+    };
+    
+    updateWidget();
+    const widgetInterval = setInterval(updateWidget, 60000); // Update every minute
+    
+    return () => clearInterval(widgetInterval); */
+  }, [getTotalScreenTime, screenTimeLimit, usageAccessEnabled]);
 
   return (
     <Container 
@@ -216,7 +231,7 @@ const Home = () => {
         </Text>
 
         {/* Test Buttons */}
-        <Box mb="xl">
+        {/* <Box mb="xl">
           <Group align="center" gap="md">
             <Button
               size="md"
@@ -243,7 +258,7 @@ const Home = () => {
               Test Threshold
             </Button>
           </Group>
-        </Box>
+        </Box> */}
 
         {/* Usage Access Permission Section */}
         <Box mt="xl" style={{ marginTop: '2rem' }}>
