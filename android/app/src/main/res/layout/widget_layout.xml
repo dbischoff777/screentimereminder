@@ -21,15 +21,28 @@
             android:textStyle="bold"
             android:gravity="center"/>
 
-        <TextView
-            android:id="@+id/limit_text"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Limit: 0m"
-            android:textColor="#FFFFFF"
-            android:textSize="14sp"
+            android:orientation="horizontal"
             android:gravity="center"
-            android:layout_marginTop="4dp"/>
+            android:layout_marginTop="4dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Limit: "
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"/>
+
+            <TextView
+                android:id="@+id/limit_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="0m"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"/>
+        </LinearLayout>
 
         <ProgressBar
             android:id="@+id/progress_bar"

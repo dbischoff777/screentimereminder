@@ -52,7 +52,7 @@ import android.content.ComponentName;
 public class AppUsageTracker extends Plugin {
     private static final String TAG = "AppUsageTracker";
     private static final String PREFS_NAME = "ScreenTimeReminder";
-    private static final String KEY_SCREEN_TIME_LIMIT = "screenTimeLimit";
+    public static final String KEY_SCREEN_TIME_LIMIT = "screenTimeLimit";
     private static final String KEY_TOTAL_SCREEN_TIME = "totalScreenTime";
     private static final String KEY_LAST_UPDATE = "lastUpdateTime";
     private static final String KEY_LAST_LIMIT_NOTIFICATION = "lastLimitReachedNotification";
@@ -263,10 +263,15 @@ public class AppUsageTracker extends Plugin {
                 if (statsList == null || statsList.isEmpty()) {
                     Log.w(TAG, "No usage data found with any interval");
                     mainHandler.post(() -> {
-                        JSONArray emptyArray = new JSONArray();
-                        JSObject result = new JSObject();
                         try {
-                            result.put("data", emptyArray.toString());
+                            JSONObject data = new JSONObject();
+                            data.put("apps", new JSONArray());
+                            data.put("totalScreenTime", 0);
+                            data.put("timestamp", System.currentTimeMillis());
+                            
+                            JSObject result = new JSObject();
+                            result.put("data", data.toString());
+                            
                             PluginCall savedCall = getSavedCall();
                             if (savedCall != null) {
                                 savedCall.resolve(result);
@@ -283,7 +288,9 @@ public class AppUsageTracker extends Plugin {
                 }
                 
                 // Process data in background
-                JSONArray usageData = new JSONArray();
+                JSONArray appsArray = new JSONArray();
+                long totalScreenTime = 0;
+                
                 for (UsageStats stats : statsList) {
                     String packageName = stats.getPackageName();
                     
@@ -294,25 +301,35 @@ public class AppUsageTracker extends Plugin {
                     long timeInForeground = stats.getTotalTimeInForeground();
                     if (timeInForeground > 0) {
                         double timeInMinutes = timeInForeground / 60000.0;
+                        totalScreenTime += timeInForeground;
                         
-                        JSONObject appUsage = createAppUsageObject(packageName);
-                        appUsage.put("time", timeInMinutes);
-                        appUsage.put("lastUsed", stats.getLastTimeUsed());
+                        String appName = getAppName(packageName);
+                        String category = getCategoryForApp(appName);
                         
-                        appUsage.put("firstTimeStamp", stats.getFirstTimeStamp());
-                        appUsage.put("lastTimeStamp", stats.getLastTimeStamp());
-                        appUsage.put("totalTimeInForeground", timeInMinutes);
+                        JSONObject appData = new JSONObject();
+                        appData.put("name", appName);
+                        appData.put("packageName", packageName);
+                        appData.put("time", timeInMinutes);
+                        appData.put("lastUsed", stats.getLastTimeUsed());
+                        appData.put("category", category);
+                        appData.put("icon", getAppIconBase64(packageName));
                         
-                        usageData.put(appUsage);
+                        appsArray.put(appData);
                     }
                 }
                 
+                // Create the complete data object
+                JSONObject completeData = new JSONObject();
+                completeData.put("apps", appsArray);
+                completeData.put("totalScreenTime", totalScreenTime / 60000.0);
+                completeData.put("timestamp", System.currentTimeMillis());
+                
                 // Return result on main thread
-                final JSONArray finalUsageData = usageData;
                 mainHandler.post(() -> {
                     try {
                         JSObject result = new JSObject();
-                        result.put("data", finalUsageData.toString());
+                        result.put("data", completeData.toString());
+                        
                         PluginCall savedCall = getSavedCall();
                         if (savedCall != null) {
                             savedCall.resolve(result);
@@ -693,13 +710,28 @@ public class AppUsageTracker extends Plugin {
     }
     
     /**
-     * Check if an app is a system app
+     * Check if an app is a system app that should be excluded from tracking
      */
     private boolean isSystemApp(String packageName) {
         PackageManager packageManager = getContext().getPackageManager();
         try {
             ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, 0);
-            return (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+            
+            // Allow specific Google apps that we want to track
+            if (packageName.startsWith("com.google.android.apps") ||  // Google apps like Maps
+                packageName.equals("com.google.android.gm") ||        // Gmail
+                packageName.equals("com.google.android.youtube") ||   // YouTube
+                packageName.equals("com.google.android.calendar") ||  // Calendar
+                packageName.equals("com.google.android.chrome")) {    // Chrome
+                return false;
+            }
+            
+            // Check if it's a system app and not on our allowlist
+            boolean isSystem = (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+            if (isSystem) {
+                Log.d(TAG, "System app detected: " + packageName);
+            }
+            return isSystem;
         } catch (PackageManager.NameNotFoundException e) {
             return false;
         }
@@ -1026,11 +1058,37 @@ public class AppUsageTracker extends Plugin {
     @PluginMethod
     public void setScreenTimeLimit(PluginCall call) {
         try {
-            long minutes = call.getLong("minutes", 120L);
+            // Get the limit value and ensure it's a valid number
+            JSObject data = call.getData();
+            if (!data.has("limit")) {
+                call.reject("Missing required parameter: limit");
+                return;
+            }
+
+            // Try to get the value as a number and convert to long
+            long minutes;
+            try {
+                // Handle both integer and double values from JavaScript
+                Object limitValue = data.get("limit");
+                if (limitValue instanceof Integer) {
+                    minutes = ((Integer) limitValue).longValue();
+                } else if (limitValue instanceof Double) {
+                    minutes = ((Double) limitValue).longValue();
+                } else if (limitValue instanceof Long) {
+                    minutes = (Long) limitValue;
+                } else {
+                    minutes = Long.parseLong(limitValue.toString());
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error parsing limit value", e);
+                call.reject("Invalid limit value: must be a number");
+                return;
+            }
+
             Log.d(TAG, "setScreenTimeLimit: Setting screen time limit to: " + minutes + " minutes");
             
-            SharedPreferences.Editor editor = getContext().getSharedPreferences("ScreenTimeReminder", Context.MODE_PRIVATE).edit();
-            editor.putLong("screenTimeLimit", minutes);
+            SharedPreferences.Editor editor = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
+            editor.putLong(KEY_SCREEN_TIME_LIMIT, minutes);
             editor.apply();
             
             // Update the widget after setting new limit
@@ -1055,7 +1113,7 @@ public class AppUsageTracker extends Plugin {
             long frequency = call.getLong("frequency", 5L);
             Log.d(TAG, "Setting notification frequency to: " + frequency);
             
-            SharedPreferences prefs = getContext().getSharedPreferences("ScreenTimeReminder", Context.MODE_PRIVATE);
+            SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             prefs.edit()
                 .putLong("notificationFrequency", frequency)
                 .apply();
@@ -1568,12 +1626,12 @@ public class AppUsageTracker extends Plugin {
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             // First try to get it as a long since that's how it's stored
-            long limitLong = prefs.getLong(KEY_SCREEN_TIME_LIMIT, 120L);
+            long limitLong = prefs.getLong(KEY_SCREEN_TIME_LIMIT, 1L); // Default to 1 minute
             // Convert to int since that's what the widget expects
             return (int) limitLong;
         } catch (Exception e) {
             Log.e(TAG, "Error getting screen time limit", e);
-            return 120; // Default to 120 minutes if there's an error
+            return 1; // Default to 1 minute if there's an error
         }
     }
 
@@ -1616,7 +1674,7 @@ public class AppUsageTracker extends Plugin {
     public void getScreenTimeLimit(PluginCall call) {
         try {
             SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            int limit = prefs.getInt(KEY_SCREEN_TIME_LIMIT, 60);
+            long limit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, 1L);
             Log.d(TAG, "Getting screen time limit: " + limit + " minutes");
             
             JSObject ret = new JSObject();

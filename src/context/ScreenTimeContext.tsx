@@ -473,21 +473,6 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     initializeApp();
   }, []);
 
-  // Add this function near the top of the file, after the imports
-  const logError = (error: string) => {
-    try {
-      const errors = JSON.parse(localStorage.getItem('debugErrors') || '[]');
-      // Keep only the last 10 errors
-      errors.unshift(error);
-      if (errors.length > 10) {
-        errors.pop();
-      }
-      localStorage.setItem('debugErrors', JSON.stringify(errors));
-    } catch (e) {
-      console.error('Error logging debug error:', e);
-    }
-  };
-
   // Get app usage data for a specific time range
   const getAppUsageData = async (startTime?: number, endTime?: number): Promise<TrackerAppUsage[]> => {
     try {
@@ -510,73 +495,105 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     }
   };
 
-  // Update the updateAppUsageData function to log errors
+  // Update app usage data
   const updateAppUsageData = async (): Promise<boolean> => {
     try {
-      console.log('ScreenTimeContext: Updating app usage data with fresh data from system');
-      
-      // Get the latest data from the system
+      console.log('ScreenTimeContext: Updating app usage data');
       const appUsageTracker = AppUsageTrackerService.getInstance();
-      const hasPermission = await appUsageTracker.hasUsagePermission();
       
-      if (!hasPermission) {
-        console.log('No permission to access usage data, cannot update');
-        logError('No permission to access usage data');
-        return false;
+      // Get fresh data from native layer
+      const data = await appUsageTracker.getAppUsageData();
+      console.log('ScreenTimeContext: Received app usage data:', data);
+      
+      if (data && Array.isArray(data)) {
+        // Update state with new data
+        setAppUsageData(data);
+        
+        // Check screen time limit
+        const totalTime = getTotalScreenTime();
+        await appUsageTracker.checkScreenTimeLimit({
+          totalTime,
+          limit: screenTimeLimit,
+          notificationFrequency
+        });
+        
+        return true;
       }
       
-      // Get data for today only
-      const now = Date.now();
-      const startOfDay = new Date();
-      startOfDay.setHours(0, 0, 0, 0);
-      const startOfDayTimestamp = startOfDay.getTime();
-      
-      console.log('Fetching data from:', new Date(startOfDayTimestamp).toISOString(), 'to', new Date(now).toISOString());
-      const latestData = await appUsageTracker.getAppUsageData(startOfDayTimestamp, now);
-      
-      if (!latestData || latestData.length === 0) {
-        console.log('No app usage data found for today');
-        logError('No app usage data found for today');
-        return false;
-      }
-      
-      console.log(`Received ${latestData.length} app usage records from system for today`);
-      
-      // Update the app usage data state with only today's data
-      const updatedData = latestData.map(app => ({
-        name: app.name,
-        time: app.time,
-        lastUsed: app.lastUsed,
-        category: app.category,
-        color: getCategoryColor(app.category),
-        isActive: false,
-        icon: app.icon
-      }));
-      
-      // Update state with the new data
-      setAppUsageData(updatedData);
-      
-      // Update localStorage
-      localStorage.setItem('appUsageData', JSON.stringify(updatedData));
-      
-      console.log('App usage data updated successfully with today\'s data');
-      
-      // Check screen time limit after updating data
-      try {
-        await checkLimit();
-        console.log('Screen time limit check completed after data update');
-      } catch (error: any) {
-        console.error('Error checking screen time limit after data update:', error);
-        logError(`Screen time limit check failed after data update: ${error.message}`);
-      }
-      
-      return true;
-    } catch (error: any) {
+      return false;
+    } catch (error) {
       console.error('Error updating app usage data:', error);
-      logError(`Failed to update app usage data: ${error.message}`);
       return false;
     }
   };
+
+  // Set up periodic updates
+  useEffect(() => {
+    if (usageAccessEnabled) {
+      console.log('ScreenTimeContext: Setting up periodic updates');
+      
+      // Initial update
+      updateAppUsageData();
+      
+      // Set up interval for periodic updates
+      const updateInterval = setInterval(() => {
+        updateAppUsageData();
+      }, 60000); // Update every minute
+      
+      return () => clearInterval(updateInterval);
+    }
+  }, [usageAccessEnabled]);
+
+  // Listen for native updates
+  useEffect(() => {
+    const handleUsageUpdate = (event: CustomEvent) => {
+      try {
+        const data = JSON.parse(event.detail.usageData);
+        if (data.apps && Array.isArray(data.apps)) {
+          console.log('ScreenTimeContext: Received usage update from native layer:', data);
+          setAppUsageData(data.apps.map((app: any) => {
+            // Determine the category based on app name if not provided
+            let category = app.category;
+            if (!category) {
+              if (/instagram|facebook|twitter|tiktok|snapchat|whatsapp|telegram|messenger/i.test(app.name)) {
+                category = 'Social Media';
+              } else if (/youtube|netflix|hulu|disney|spotify|music|video|player|movie/i.test(app.name)) {
+                category = 'Entertainment';
+              } else if (/chrome|safari|firefox|edge|browser|gmail|outlook|office|word|excel|powerpoint|docs/i.test(app.name)) {
+                category = 'Productivity';
+              } else if (/game|games|gaming|play|puzzle|candy|clash|craft/i.test(app.name)) {
+                category = 'Games';
+              } else if (/learn|education|school|course|study|duolingo|khan|quiz/i.test(app.name)) {
+                category = 'Education';
+              } else {
+                category = 'Other';
+              }
+            }
+
+            // Get color based on category
+            const color = getCategoryColor(category);
+
+            return {
+              name: app.name || 'Unknown App',
+              time: app.time || 0,
+              color: color,
+              lastUsed: app.lastUsed ? new Date(app.lastUsed) : undefined,
+              category: category,
+              isActive: false,
+              icon: app.icon
+            };
+          }));
+        }
+      } catch (error) {
+        console.error('Error processing usage update:', error);
+      }
+    };
+
+    window.addEventListener('com.screentimereminder.app.APP_USAGE_UPDATE', handleUsageUpdate as EventListener);
+    return () => {
+      window.removeEventListener('com.screentimereminder.app.APP_USAGE_UPDATE', handleUsageUpdate as EventListener);
+    };
+  }, []);
 
   return (
     <ScreenTimeContext.Provider

@@ -38,10 +38,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ExecutorService;
 
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 public class BackgroundService extends Service {
     private static final String TAG = "BackgroundService";
     private static final String CHANNEL_ID = "ScreenTimeReminderChannel";
+    private static final String PREFS_NAME = "ScreenTimeReminder";
     private static final int NOTIFICATION_ID_LIMIT_REACHED = 1;
     private static final int NOTIFICATION_ID_APPROACHING_LIMIT = 2;
     private static final int NOTIFICATION_ID_BACKGROUND_SERVICE = 3;
@@ -224,38 +226,41 @@ public class BackgroundService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d(TAG, "Service onStartCommand - Action: " + (intent != null ? intent.getAction() : "null"));
         try {
-            // Ensure we're running as foreground service
-            try {
-                Notification notification = createNotification();
-                if (notification != null) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                        startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-                    } else {
-                        startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, notification);
-                    }
-                    Log.d(TAG, "Started as foreground service in onStartCommand");
-                }
-            } catch (SecurityException e) {
-                Log.e(TAG, "SecurityException when starting foreground service", e);
-                // Try to start without foreground service type
+            // Only create notification if we're not already a foreground service
+            if (!isRunning) {
                 try {
                     Notification notification = createNotification();
                     if (notification != null) {
-                        startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, notification);
-                        Log.d(TAG, "Started as foreground service without type in onStartCommand");
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                            startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+                        } else {
+                            startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, notification);
+                        }
+                        Log.d(TAG, "Started as foreground service in onStartCommand");
+                        isRunning = true;
                     }
-                } catch (Exception ex) {
-                    Log.e(TAG, "Failed to start foreground service in onStartCommand", ex);
+                } catch (SecurityException e) {
+                    Log.e(TAG, "SecurityException when starting foreground service", e);
+                    // Try to start without foreground service type
+                    try {
+                        Notification notification = createNotification();
+                        if (notification != null) {
+                            startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, notification);
+                            Log.d(TAG, "Started as foreground service without type in onStartCommand");
+                            isRunning = true;
+                        }
+                    } catch (Exception ex) {
+                        Log.e(TAG, "Failed to start foreground service in onStartCommand", ex);
+                    }
                 }
             }
             
-            // Start the update runnable
-            if (updateRunnable != null) {
+            // Start the update runnable if not already running
+            if (updateRunnable != null && !isRunning) {
                 mainHandler.post(updateRunnable);
                 Log.d(TAG, "Started update runnable in onStartCommand");
             }
             
-            // Return START_STICKY to ensure the service is restarted if killed
             return START_STICKY;
         } catch (Exception e) {
             Log.e(TAG, "Error in onStartCommand", e);
@@ -293,75 +298,65 @@ public class BackgroundService extends Service {
 
         backgroundExecutor.execute(() -> {
             try {
-                // Get start of day
-                Calendar calendar = Calendar.getInstance();
-                calendar.set(Calendar.HOUR_OF_DAY, 0);
-                calendar.set(Calendar.MINUTE, 0);
-                calendar.set(Calendar.SECOND, 0);
-                calendar.set(Calendar.MILLISECOND, 0);
-                long startTime = calendar.getTimeInMillis();
-                long endTime = System.currentTimeMillis();
+                // Get data directly from AppUsageTracker
+                int totalScreenTime = AppUsageTracker.getTotalScreenTimeStatic(this);
+                int screenTimeLimit = AppUsageTracker.getScreenTimeLimitStatic(this);
 
-                // Query usage stats for today only
-                Map<String, UsageStats> stats = usageStatsManager.queryAndAggregateUsageStats(startTime, endTime);
-                if (stats == null || stats.isEmpty()) {
-                    Log.w(TAG, "No usage stats available for today");
-                    return;
+                // Get detailed app usage data
+                UsageStatsManager usageStatsManager = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+                if (usageStatsManager != null) {
+                    long startTime = getStartOfDay();
+                    long endTime = System.currentTimeMillis();
+                    
+                    Map<String, UsageStats> stats = usageStatsManager.queryAndAggregateUsageStats(startTime, endTime);
+                    JSONArray appsArray = new JSONArray();
+                    
+                    for (Map.Entry<String, UsageStats> entry : stats.entrySet()) {
+                        String packageName = entry.getKey();
+                        UsageStats usageStats = entry.getValue();
+                        
+                        // Skip system apps and our own app
+                        if (isSystemApp(packageName) || packageName.equals(getPackageName())) {
+                            continue;
+                        }
+                        
+                        // Only include apps that have been used today
+                        if (usageStats.getLastTimeUsed() >= startTime) {
+                            JSONObject appData = new JSONObject();
+                            appData.put("packageName", packageName);
+                            appData.put("name", getAppName(packageName));
+                            appData.put("time", usageStats.getTotalTimeInForeground() / (1000.0 * 60.0)); // Convert to minutes
+                            appData.put("lastUsed", usageStats.getLastTimeUsed());
+                            appData.put("category", getCategoryForApp(getAppName(packageName)));
+                            appData.put("icon", getAppIconBase64(packageName));
+                            
+                            appsArray.put(appData);
+                        }
+                    }
+                    
+                    // Create the complete usage data object
+                    JSONObject usageData = new JSONObject();
+                    usageData.put("totalScreenTime", totalScreenTime);
+                    usageData.put("screenTimeLimit", screenTimeLimit);
+                    usageData.put("timestamp", System.currentTimeMillis());
+                    usageData.put("apps", appsArray);
+                    
+                    // Broadcast the update
+                    Intent updateIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
+                    updateIntent.putExtra("usageData", usageData.toString());
+                    sendBroadcast(updateIntent);
+                    
+                    Log.d(TAG, "App usage updated with " + appsArray.length() + " apps");
                 }
 
-                // Calculate total time excluding system apps and our own app
-                long totalTimeInForeground = 0;
-                String ourPackage = getPackageName();
-                
-                for (Map.Entry<String, UsageStats> entry : stats.entrySet()) {
-                    String packageName = entry.getKey();
-                    UsageStats usageStats = entry.getValue();
+                // Update widget
+                Intent updateWidgetIntent = new Intent(this, ScreenTimeWidgetProvider.class);
+                updateWidgetIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
+                int[] ids = AppWidgetManager.getInstance(this)
+                    .getAppWidgetIds(new ComponentName(this, ScreenTimeWidgetProvider.class));
+                updateWidgetIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+                sendBroadcast(updateWidgetIntent);
 
-                    if (!packageName.equals(ourPackage) && !isSystemApp(packageName)) {
-                        totalTimeInForeground += usageStats.getTotalTimeInForeground();
-                    }
-                }
-
-                // Convert to minutes
-                int totalMinutes = (int) (totalTimeInForeground / (60 * 1000));
-                
-                // Get screen time limit
-                SharedPreferences prefs = getSharedPreferences("ScreenTimeReminder", MODE_PRIVATE);
-                long screenTimeLimit = prefs.getLong("screenTimeLimit", 60);
-
-                // Store the calculated value
-                prefs.edit()
-                    .putInt("totalScreenTime", totalMinutes)
-                    .putLong("lastUpdateTime", System.currentTimeMillis())
-                    .apply();
-
-                // Create JSON object with the data
-                final JSONObject data = new JSONObject();
-                data.put("totalScreenTime", totalMinutes);
-                data.put("screenTimeLimit", screenTimeLimit);
-                data.put("timestamp", System.currentTimeMillis());
-
-                // Post updates to main thread
-                mainHandler.post(() -> {
-                    try {
-                        // Broadcast the update
-                        Intent intent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
-                        intent.putExtra("usageData", data.toString());
-                        sendBroadcast(intent);
-
-                        // Update widget
-                        Intent updateWidgetIntent = new Intent(this, ScreenTimeWidgetProvider.class);
-                        updateWidgetIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
-                        int[] ids = AppWidgetManager.getInstance(this)
-                            .getAppWidgetIds(new ComponentName(this, ScreenTimeWidgetProvider.class));
-                        updateWidgetIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
-                        sendBroadcast(updateWidgetIntent);
-
-                        Log.d(TAG, "App usage updated - Total: " + totalMinutes + " minutes, Limit: " + screenTimeLimit + " minutes");
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error broadcasting updates", e);
-                    }
-                });
             } catch (Exception e) {
                 Log.e(TAG, "Error updating app usage", e);
             } finally {
@@ -382,7 +377,7 @@ public class BackgroundService extends Service {
             Log.d(TAG, "Starting broadcastUsageData");
             
             // Get the latest total screen time from shared preferences
-            SharedPreferences prefs = getSharedPreferences("ScreenTimeReminder", MODE_PRIVATE);
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
             int totalMinutes = prefs.getInt("totalScreenTime", 0);
             long lastUpdate = prefs.getLong("lastUpdateTime", 0);
             
@@ -454,19 +449,6 @@ public class BackgroundService extends Service {
                 } catch (Exception e) {
                     Log.e(TAG, "Error releasing WakeLock", e);
                 }
-            }
-            
-            // Restart the service
-            Intent restartServiceIntent = new Intent(getApplicationContext(), this.getClass());
-            restartServiceIntent.setPackage(getPackageName());
-            restartServiceIntent.setAction("RESTART_SERVICE");
-            
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(restartServiceIntent);
-                Log.d(TAG, "Restarted service as foreground service");
-            } else {
-                startService(restartServiceIntent);
-                Log.d(TAG, "Restarted service");
             }
         } catch (Exception e) {
             Log.e(TAG, "Error in onDestroy", e);
@@ -591,5 +573,27 @@ public class BackgroundService extends Service {
         } catch (PackageManager.NameNotFoundException e) {
             return false;
         }
+    }
+
+    private String getAppName(String packageName) {
+        try {
+            PackageManager packageManager = getPackageManager();
+            ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, 0);
+            return packageManager.getApplicationLabel(appInfo).toString();
+        } catch (PackageManager.NameNotFoundException e) {
+            return packageName;
+        }
+    }
+
+    private String getCategoryForApp(String appName) {
+        // Implement the logic to determine the category for a given app name
+        // This is a placeholder and should be replaced with the actual implementation
+        return "Uncategorized";
+    }
+
+    private String getAppIconBase64(String packageName) {
+        // Implement the logic to get the base64 representation of the app icon
+        // This is a placeholder and should be replaced with the actual implementation
+        return "";
     }
 } 

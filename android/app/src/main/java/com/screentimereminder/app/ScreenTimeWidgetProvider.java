@@ -9,12 +9,13 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.util.Log;
 import android.widget.RemoteViews;
-import org.json.JSONObject;
+import java.util.Map;
 
 public class ScreenTimeWidgetProvider extends AppWidgetProvider {
     private static final String TAG = "ScreenTimeWidget";
     private static final String PREFS_NAME = "ScreenTimeReminder";
-    private static final String KEY_WIDGET_DATA = "widget_data";
+    private static final String KEY_SCREEN_TIME_LIMIT = "screenTimeLimit";
+    private static final String KEY_TOTAL_SCREEN_TIME = "totalScreenTime";
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -28,30 +29,20 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
                 ComponentName thisWidget = new ComponentName(context, ScreenTimeWidgetProvider.class);
                 int[] appWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget);
                 
-                Log.d(TAG, "Updating widgets: " + appWidgetIds.length);
+                Log.d(TAG, "Manually refreshing widgets: " + appWidgetIds.length);
                 
                 // Update all widgets
                 onUpdate(context, appWidgetManager, appWidgetIds);
-            } else if (intent.getAction().equals("com.screentimereminder.app.APP_USAGE_UPDATE")) {
-                try {
-                    String usageData = intent.getStringExtra("usageData");
-                    if (usageData != null) {
-                        // Store the data
-                        SharedPreferences.Editor editor = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
-                        editor.putString(KEY_WIDGET_DATA, usageData);
-                        editor.apply();
-                        
-                        // Update widgets
-                        AppWidgetManager appWidgetManager = AppWidgetManager.getInstance(context);
-                        ComponentName thisWidget = new ComponentName(context, ScreenTimeWidgetProvider.class);
-                        int[] appWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget);
-                        onUpdate(context, appWidgetManager, appWidgetIds);
-                        
-                        Log.d(TAG, "Updated widget data from broadcast: " + usageData);
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Error processing usage data update", e);
-                }
+            } else if (intent.getAction().equals("android.appwidget.action.APPWIDGET_UPDATE")) {
+                // Get AppWidget ids
+                AppWidgetManager appWidgetManager = AppWidgetManager.getInstance(context);
+                ComponentName thisWidget = new ComponentName(context, ScreenTimeWidgetProvider.class);
+                int[] appWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget);
+                
+                Log.d(TAG, "System requested widget update: " + appWidgetIds.length);
+                
+                // Update all widgets
+                onUpdate(context, appWidgetManager, appWidgetIds);
             }
         }
     }
@@ -68,29 +59,22 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_layout);
 
         try {
-            // Try to get data from SharedPreferences first
+            // Get data from shared preferences
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            String widgetData = prefs.getString(KEY_WIDGET_DATA, null);
             
-            int totalScreenTime;
-            int screenTimeLimit;
-            
-            if (widgetData != null) {
-                // Parse the stored JSON data
-                JSONObject data = new JSONObject(widgetData);
-                totalScreenTime = data.getInt("totalScreenTime");
-                screenTimeLimit = data.getInt("screenTimeLimit");
-                Log.d(TAG, "Using widget data from preferences: " + widgetData);
-            } else {
-                // Fallback to static methods
-                totalScreenTime = AppUsageTracker.getTotalScreenTimeStatic(context);
-                screenTimeLimit = AppUsageTracker.getScreenTimeLimitStatic(context);
-                Log.d(TAG, "Using fallback data from static methods");
+            // Log all relevant preferences
+            Map<String, ?> allPrefs = prefs.getAll();
+            Log.d(TAG, "All SharedPreferences values from " + PREFS_NAME + ":");
+            for (Map.Entry<String, ?> entry : allPrefs.entrySet()) {
+                Log.d(TAG, entry.getKey() + ": " + entry.getValue() + " (" + (entry.getValue() != null ? entry.getValue().getClass().getSimpleName() : "null") + ")");
             }
+            
+            float totalScreenTime = prefs.getFloat(KEY_TOTAL_SCREEN_TIME, 0f);
+            long screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, 1L); // Default to 1 minute
 
-            // Format the time values using the formatTime method
-            String usedTimeText = String.format("Used: %s", formatTime(totalScreenTime));
-            String limitText = String.format("Limit: %s", formatTime(screenTimeLimit));
+            // Format the time values
+            String usedTimeText = String.format("Used: %s", formatTime(Math.round(totalScreenTime)));
+            String limitText = String.format("%s", formatTime((int)screenTimeLimit));
 
             // Calculate progress percentage (capped at 100%)
             int progressPercent = Math.min((int)((totalScreenTime * 100.0f) / screenTimeLimit), 100);
@@ -113,8 +97,8 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
             );
             views.setOnClickPendingIntent(R.id.refresh_button, refreshPendingIntent);
 
-            Log.d(TAG, String.format("Updating widget %d - Time: %s, Limit: %s, Progress: %d%%", 
-                appWidgetId, usedTimeText, limitText, progressPercent));
+            Log.d(TAG, String.format("Updating widget %d - Time: %s, Limit: %s, Progress: %d%%, Raw values: %.2f/%d", 
+                appWidgetId, usedTimeText, limitText, progressPercent, totalScreenTime, screenTimeLimit));
 
             // Update the widget
             appWidgetManager.updateAppWidget(appWidgetId, views);

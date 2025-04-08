@@ -190,76 +190,55 @@ export default class AppUsageTrackerService {
       const hasPermission = await this.hasUsagePermission();
       if (!hasPermission) {
         console.warn('AppUsageTracker: Usage stats permission not granted');
-        
-        // Try to get data from localStorage as fallback
-        try {
-          const cachedData = localStorage.getItem('lastAppUsageData');
-          if (cachedData) {
-            console.log('AppUsageTracker: Using cached data from localStorage');
-            return JSON.parse(cachedData);
-          }
-        } catch (cacheError) {
-          console.error('Error reading cached app usage data:', cacheError);
-        }
-        
         return [];
       }
-      
-      // Get the data from the native layer
-      console.log('AppUsageTracker: Calling native getAppUsageData method');
-      const result = await AppUsageTracker.getAppUsageData({ 
-        startTime: start, 
-        endTime: end 
+
+      // Get data from native layer
+      const result = await AppUsageTracker.getAppUsageData({ startTime: start, endTime: end });
+      if (!result.data) {
+        console.warn('AppUsageTracker: No data received from native layer');
+        return [];
+      }
+
+      // Parse the JSON data
+      const parsedData = JSON.parse(result.data);
+      if (!parsedData.apps || !Array.isArray(parsedData.apps)) {
+        console.warn('AppUsageTracker: Invalid data format received');
+        return [];
+      }
+
+      // Transform the data into AppUsage format
+      const appUsageData: AppUsage[] = parsedData.apps.map((app: any) => {
+        // Determine the category based on app name if not provided
+        const category = app.category || this.getCategoryForApp(app.name);
+        
+        // Get color based on category or generate one based on app name
+        const color = category !== 'Other' ? 
+          this.getCategoryColor(category) : 
+          this.getColorForApp(app.name);
+
+        return {
+          name: app.name || 'Unknown App',
+          time: app.time || 0,
+          color: color,
+          lastUsed: app.lastUsed ? new Date(app.lastUsed) : undefined,
+          category: category,
+          isActive: false,
+          icon: app.icon || undefined
+        };
       });
-      
-      console.log('AppUsageTracker: Raw result from native layer:', result);
-      
-      if (!result || !result.data) {
-        console.log('AppUsageTracker: No data returned from native layer');
-        return [];
-      }
-      
-      // Parse the JSON string into an array of objects
-      let rawData;
-      try {
-        rawData = JSON.parse(result.data);
-        console.log(`AppUsageTracker: Received ${rawData.length} app usage records from native layer`);
-      } catch (parseError) {
-        console.error('AppUsageTracker: Error parsing JSON data:', parseError);
-        console.log('AppUsageTracker: Raw data that failed to parse:', result.data);
-        return [];
-      }
-      
-      // Log all data for debugging
-      console.log('AppUsageTracker: Full data:', rawData);
-      
-      // Convert the raw data to AppUsage objects
-      const appUsageData = this.convertToAppUsage(rawData);
-      console.log(`AppUsageTracker: Converted ${appUsageData.length} app usage records`);
-      
-      // Store the data in localStorage for offline access
-      try {
-        localStorage.setItem('lastAppUsageData', JSON.stringify(appUsageData));
-        localStorage.setItem('lastAppUsageDataTimestamp', Date.now().toString());
-      } catch (storageError) {
-        console.error('Error storing app usage data in localStorage:', storageError);
-      }
-      
+
+      // Sort by usage time in descending order
+      appUsageData.sort((a, b) => b.time - a.time);
+
+      // Cache the data
+      localStorage.setItem('lastAppUsageData', JSON.stringify(appUsageData));
+      localStorage.setItem('lastAppUsageUpdate', Date.now().toString());
+
+      console.log('AppUsageTracker: Processed app usage data:', appUsageData);
       return appUsageData;
     } catch (error) {
       console.error('Error getting app usage data:', error);
-      
-      // Try to get data from localStorage as fallback
-      try {
-        const cachedData = localStorage.getItem('lastAppUsageData');
-        if (cachedData) {
-          console.log('AppUsageTracker: Using cached data from localStorage');
-          return JSON.parse(cachedData);
-        }
-      } catch (cacheError) {
-        console.error('Error reading cached app usage data:', cacheError);
-      }
-      
       return [];
     }
   }
@@ -281,77 +260,22 @@ export default class AppUsageTrackerService {
   }
 
   /**
-   * Convert raw data from the native layer to AppUsage objects
-   */
-  private convertToAppUsage(rawData: any[]): AppUsage[] {
-    try {
-      if (!Array.isArray(rawData) || rawData.length === 0) {
-        console.log('AppUsageTracker: No raw data to convert');
-        return [];
-      }
-      
-      return rawData.map(item => {
-        // Extract proper app name from the data
-        // The Java code might send the app name in different formats
-        let appName = 'Unknown App';
-        
-        // If we have a proper name field, use it
-        if (item.name && typeof item.name === 'string') {
-          // Check if the name contains package name (com.example.app)
-          if (item.name.includes('.')) {
-            // Try to extract the app name from the package
-            const nameParts = item.name.split('.');
-            // Use the last part of the package name as a fallback
-            const lastPart = nameParts[nameParts.length - 1];
-            
-            // Capitalize the first letter and format the rest
-            appName = lastPart.charAt(0).toUpperCase() + lastPart.slice(1);
-          } else {
-            // If it doesn't look like a package name, use it directly
-            appName = item.name;
-          }
-        } else if (item.packageName && typeof item.packageName === 'string') {
-          // If we only have packageName, extract a readable name from it
-          const nameParts = item.packageName.split('.');
-          const lastPart = nameParts[nameParts.length - 1];
-          appName = lastPart.charAt(0).toUpperCase() + lastPart.slice(1);
-        }
-        
-        // Generate a consistent color for this app based on its name or category
-        const color = item.category ? 
-          this.getCategoryColor(item.category) : 
-          this.getColorForApp(appName);
-        
-        // Create the AppUsage object
-        const appUsage: AppUsage = {
-          name: appName,
-          time: item.time || 0,
-          color,
-          lastUsed: item.lastUsed ? new Date(item.lastUsed) : undefined,
-          category: item.category || this.getCategoryForApp(appName),
-          isActive: item.isActive || false,
-          icon: item.icon || undefined
-        };
-        
-        return appUsage;
-      });
-    } catch (error) {
-      console.error('Error converting app usage data:', error);
-      return [];
-    }
-  }
-
-  /**
    * Get a color for a category
    */
   private getCategoryColor(category: string): string {
-    switch (category) {
-      case 'Social Media': return '#FF00FF';
-      case 'Entertainment': return '#FF5733';
-      case 'Productivity': return '#33FF57';
-      case 'Games': return '#00FFFF';
-      case 'Education': return '#3357FF';
-      default: return '#A833FF';
+    switch (category.toLowerCase()) {
+      case 'social media':
+        return '#FF00FF';
+      case 'entertainment':
+        return '#FF5733';
+      case 'productivity':
+        return '#33FF57';
+      case 'games':
+        return '#00FFFF';
+      case 'education':
+        return '#3357FF';
+      default:
+        return '#A833FF';
     }
   }
 

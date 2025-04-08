@@ -115,13 +115,21 @@ const Statistics = () => {
   // Get filtered and sorted apps for breakdown and distribution sections
   const getFilteredApps = () => {
     const totalTime = totalTodayScreenTime;
-    return sortedTimelineData
-      .filter(app => {
-        if (!app.time || app.time <= 0) return false;
-        const percentage = (app.time / totalTime) * 100;
-        return percentage >= 5;
-      })
+    const allApps = sortedTimelineData
+      .filter(app => app.time > 0)  // Only filter out apps with no usage
       .sort((a, b) => b.time - a.time);
+    
+    // If we have too many apps, only show the top ones that make up 95% of usage
+    if (allApps.length > 10) {
+      let accumulatedPercentage = 0;
+      return allApps.filter(app => {
+        const percentage = (app.time / totalTime) * 100;
+        accumulatedPercentage += percentage;
+        return accumulatedPercentage <= 95;  // Show apps until we reach 95% of total usage
+      });
+    }
+    
+    return allApps;  // Show all apps if we have 10 or fewer
   };
 
   const sortedApps = getFilteredApps();
