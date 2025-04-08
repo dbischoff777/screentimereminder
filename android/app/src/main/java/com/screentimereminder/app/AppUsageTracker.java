@@ -1058,7 +1058,6 @@ public class AppUsageTracker extends Plugin {
     @PluginMethod
     public void setScreenTimeLimit(PluginCall call) {
         try {
-            // Get the limit value and ensure it's a valid number
             JSObject data = call.getData();
             if (!data.has("limit")) {
                 call.reject("Missing required parameter: limit");
@@ -1087,19 +1086,9 @@ public class AppUsageTracker extends Plugin {
 
             Log.d(TAG, "setScreenTimeLimit: Setting screen time limit to: " + minutes + " minutes");
             
-            SharedPreferences.Editor editor = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
-            editor.putLong(KEY_SCREEN_TIME_LIMIT, minutes);
-            editor.apply();
+            // Use the static method to ensure consistent updates
+            setScreenTimeLimitStatic(getContext(), (int)minutes);
             
-            // Update the widget after setting new limit
-            Intent updateIntent = new Intent(getContext(), ScreenTimeWidgetProvider.class);
-            updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
-            int[] ids = AppWidgetManager.getInstance(getContext())
-                .getAppWidgetIds(new ComponentName(getContext(), ScreenTimeWidgetProvider.class));
-            updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
-            getContext().sendBroadcast(updateIntent);
-            
-            Log.d(TAG, "Screen time limit updated successfully and widget update broadcast sent");
             call.resolve();
         } catch (Exception e) {
             Log.e(TAG, "Error setting screen time limit", e);
@@ -1680,16 +1669,31 @@ public class AppUsageTracker extends Plugin {
      */
     public static void setScreenTimeLimitStatic(Context context, int limitMinutes) {
         try {
+            Log.d(TAG, "setScreenTimeLimitStatic: Setting screen time limit to: " + limitMinutes + " minutes");
+            
+            // Update SharedPreferences
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             SharedPreferences.Editor editor = prefs.edit();
-            // Store as long to maintain consistency
             editor.putLong(KEY_SCREEN_TIME_LIMIT, (long) limitMinutes);
             editor.apply();
-            Log.d(TAG, "Screen time limit set to: " + limitMinutes + " minutes");
 
-            // Broadcast update to widget
-            Intent updateIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
+            // Update widget
+            Intent updateIntent = new Intent(context, ScreenTimeWidgetProvider.class);
+            updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
+            int[] ids = AppWidgetManager.getInstance(context)
+                .getAppWidgetIds(new ComponentName(context, ScreenTimeWidgetProvider.class));
+            updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
             context.sendBroadcast(updateIntent);
+
+            // Also broadcast a general update
+            Intent broadcastIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
+            JSONObject updateData = new JSONObject();
+            updateData.put("screenTimeLimit", limitMinutes);
+            updateData.put("timestamp", System.currentTimeMillis());
+            broadcastIntent.putExtra("usageData", updateData.toString());
+            context.sendBroadcast(broadcastIntent);
+            
+            Log.d(TAG, "Screen time limit updated successfully and broadcasts sent");
         } catch (Exception e) {
             Log.e(TAG, "Error setting screen time limit", e);
         }

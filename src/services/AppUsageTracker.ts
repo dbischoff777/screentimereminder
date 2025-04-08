@@ -44,6 +44,7 @@ export interface AppUsageTrackerPlugin {
   }>;
   setScreenTimeLimit(params: { limit: number }): Promise<void>;
   setNotificationFrequency(params: { frequency: number }): Promise<void>;
+  getScreenTimeLimit(): Promise<{ value: number }>;
 }
 
 // Register the AppUsageTracker plugin
@@ -464,6 +465,21 @@ export default class AppUsageTrackerService {
     } catch (error) {
       console.error('Error getting notification frequency:', error);
       return 15; // Default to 15 minutes
+    }
+  }
+
+  /**
+   * Get screen time limit
+   */
+  public async getScreenTimeLimit(): Promise<number> {
+    try {
+      console.log('AppUsageTracker: Getting screen time limit');
+      const result = await this.plugin.getScreenTimeLimit();
+      console.log('AppUsageTracker: Got screen time limit:', result.value);
+      return result.value;
+    } catch (error) {
+      console.error('Error getting screen time limit:', error);
+      return 30; // Default to 30 minutes
     }
   }
 } 

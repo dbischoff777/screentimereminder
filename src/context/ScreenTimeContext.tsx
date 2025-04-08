@@ -112,6 +112,24 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     }
   };
 
+  // Initialize screen time limit from native storage
+  useEffect(() => {
+    const initializeScreenTimeLimit = async () => {
+      try {
+        const appUsageTracker = AppUsageTrackerService.getInstance();
+        const limit = await appUsageTracker.getScreenTimeLimit();
+        if (limit !== screenTimeLimit) {
+          console.log('ScreenTimeContext: Initializing screen time limit from native storage:', limit);
+          setScreenTimeLimit(limit);
+        }
+      } catch (error) {
+        console.error('Error initializing screen time limit:', error);
+      }
+    };
+
+    initializeScreenTimeLimit();
+  }, []);
+
   // Save settings to localStorage whenever they change
   useEffect(() => {
     console.log('Screen time limit changed in context:', screenTimeLimit);
