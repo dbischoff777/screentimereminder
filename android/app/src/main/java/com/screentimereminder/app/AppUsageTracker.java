@@ -1461,29 +1461,9 @@ public class AppUsageTracker extends Plugin {
                 return;
             }
 
-            List<UsageStats> stats = getAppUsageData();
-            if (stats.isEmpty()) {
-                call.reject("No usage data available");
-                return;
-            }
-
-            long totalTimeInForeground = 0;
-            for (UsageStats usageStats : stats) {
-                if (!isSystemApp(usageStats.getPackageName())) {
-                    totalTimeInForeground += usageStats.getTotalTimeInForeground();
-                }
-            }
-
-            // Convert to minutes
-            float totalMinutes = totalTimeInForeground / (1000f * 60f);
-            Log.d(TAG, "getTotalScreenTime: Calculated total screen time: " + totalMinutes + " minutes");
-
-            // Store in SharedPreferences
-            SharedPreferences.Editor editor = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
-            editor.putFloat(KEY_TOTAL_SCREEN_TIME, totalMinutes);
-            editor.putLong(KEY_LAST_UPDATE, System.currentTimeMillis());
-            editor.apply();
-
+            // Use the static method to ensure consistent calculation
+            int totalMinutes = getTotalScreenTimeStatic(getContext());
+            
             // Update the widget
             Intent updateIntent = new Intent(getContext(), ScreenTimeWidgetProvider.class);
             updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
@@ -1567,9 +1547,10 @@ public class AppUsageTracker extends Plugin {
             long lastUpdate = prefs.getLong(KEY_LAST_UPDATE, 0);
             long now = System.currentTimeMillis();
             
-            // If last update was less than 1 minute ago, return stored value
-            if (now - lastUpdate < 60000) {
+            // If last update was less than 30 seconds ago, return stored value
+            if (now - lastUpdate < 30000) {
                 float storedTime = getSafeScreenTime(prefs);
+                Log.d(TAG, "Using cached screen time: " + storedTime + " minutes (last update: " + (now - lastUpdate) + "ms ago)");
                 return Math.round(storedTime);
             }
 
@@ -1624,8 +1605,12 @@ public class AppUsageTracker extends Plugin {
             float totalMinutes = totalTimeInForeground / (60f * 1000f);
             
             // Store the calculated value
-            updateTotalScreenTime(context, totalMinutes);
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putFloat(KEY_TOTAL_SCREEN_TIME, totalMinutes);
+            editor.putLong(KEY_LAST_UPDATE, System.currentTimeMillis());
+            editor.apply();
 
+            Log.d(TAG, "Updated total screen time: " + totalMinutes + " minutes");
             return Math.round(totalMinutes);
         } catch (Exception e) {
             Log.e(TAG, "Error getting total screen time", e);
@@ -1654,13 +1639,38 @@ public class AppUsageTracker extends Plugin {
     public static int getScreenTimeLimitStatic(Context context) {
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            // First try to get it as a long since that's how it's stored
-            long limitLong = prefs.getLong(KEY_SCREEN_TIME_LIMIT, 1L); // Default to 1 minute
-            // Convert to int since that's what the widget expects
-            return (int) limitLong;
+            
+            // First try to get it as a long (preferred storage type)
+            try {
+                long limitLong = prefs.getLong(KEY_SCREEN_TIME_LIMIT, 120L);
+                Log.d(TAG, "Got screen time limit as long: " + limitLong);
+                return (int) limitLong;
+            } catch (ClassCastException e) {
+                // If stored as float/int, try to recover
+                try {
+                    float limitFloat = prefs.getFloat(KEY_SCREEN_TIME_LIMIT, 120f);
+                    Log.d(TAG, "Got screen time limit as float: " + limitFloat);
+                    return Math.round(limitFloat);
+                } catch (ClassCastException e2) {
+                    try {
+                        int limitInt = prefs.getInt(KEY_SCREEN_TIME_LIMIT, 120);
+                        Log.d(TAG, "Got screen time limit as int: " + limitInt);
+                        
+                        // Store it back as long for consistency
+                        SharedPreferences.Editor editor = prefs.edit();
+                        editor.putLong(KEY_SCREEN_TIME_LIMIT, limitInt);
+                        editor.apply();
+                        
+                        return limitInt;
+                    } catch (ClassCastException e3) {
+                        Log.e(TAG, "Could not read screen time limit as any numeric type", e3);
+                        return 120; // Default to 120 minutes (2 hours)
+                    }
+                }
+            }
         } catch (Exception e) {
             Log.e(TAG, "Error getting screen time limit", e);
-            return 1; // Default to 1 minute if there's an error
+            return 120; // Default to 120 minutes (2 hours)
         }
     }
 
