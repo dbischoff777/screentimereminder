@@ -132,13 +132,33 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     localStorage.setItem('notificationsEnabled', notificationsEnabled.toString());
   }, [notificationsEnabled]);
 
+  // Initialize notification frequency from native storage
   useEffect(() => {
-    console.log('Notification frequency changed in context:', notificationFrequency);
+    const initializeNotificationFrequency = async () => {
+      try {
+        const appUsageTracker = AppUsageTrackerService.getInstance();
+        const frequency = await appUsageTracker.getNotificationFrequency();
+        setNotificationFrequency(frequency);
+        console.log('ScreenTimeContext: Initialized notification frequency from native storage:', frequency);
+      } catch (error) {
+        console.error('Error initializing notification frequency:', error);
+      }
+    };
+
+    initializeNotificationFrequency();
+  }, []);
+
+  // Save notification frequency to localStorage and sync with native code
+  useEffect(() => {
+    console.log('ScreenTimeContext: Notification frequency changed:', notificationFrequency);
     localStorage.setItem('notificationFrequency', notificationFrequency.toString());
     
     // Sync with native code
     const appUsageTracker = AppUsageTrackerService.getInstance();
     appUsageTracker.setNotificationFrequency(notificationFrequency)
+      .then(() => {
+        console.log('ScreenTimeContext: Successfully synced notification frequency with native code');
+      })
       .catch(error => {
         console.error('Error syncing notification frequency with native code:', error);
       });

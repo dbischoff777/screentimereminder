@@ -438,13 +438,32 @@ export default class AppUsageTrackerService {
     }
   }
 
+  /**
+   * Set notification frequency
+   */
   public async setNotificationFrequency(frequency: number): Promise<void> {
     try {
-      console.log('Setting notification frequency in native:', frequency);
+      console.log('AppUsageTracker: Setting notification frequency to:', frequency);
       await this.plugin.setNotificationFrequency({ frequency });
+      console.log('AppUsageTracker: Notification frequency set successfully');
     } catch (error) {
       console.error('Error setting notification frequency:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Get notification frequency
+   */
+  public async getNotificationFrequency(): Promise<number> {
+    try {
+      console.log('AppUsageTracker: Getting notification frequency');
+      const result = await this.plugin.getNotificationFrequency();
+      console.log('AppUsageTracker: Got notification frequency:', result.value);
+      return result.value;
+    } catch (error) {
+      console.error('Error getting notification frequency:', error);
+      return 15; // Default to 15 minutes
     }
   }
 } 

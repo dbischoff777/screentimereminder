@@ -1110,19 +1110,59 @@ public class AppUsageTracker extends Plugin {
     @PluginMethod
     public void setNotificationFrequency(PluginCall call) {
         try {
-            long frequency = call.getLong("frequency", 5L);
-            Log.d(TAG, "Setting notification frequency to: " + frequency);
+            JSObject data = call.getData();
+            if (!data.has("frequency")) {
+                call.reject("Missing required parameter: frequency");
+                return;
+            }
+
+            // Try to get the value as a number and convert to long
+            long minutes;
+            try {
+                // Handle both integer and double values from JavaScript
+                Object frequencyValue = data.get("frequency");
+                if (frequencyValue instanceof Integer) {
+                    minutes = ((Integer) frequencyValue).longValue();
+                } else if (frequencyValue instanceof Double) {
+                    minutes = ((Double) frequencyValue).longValue();
+                } else if (frequencyValue instanceof Long) {
+                    minutes = (Long) frequencyValue;
+                } else {
+                    minutes = Long.parseLong(frequencyValue.toString());
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error parsing frequency value", e);
+                call.reject("Invalid frequency value: must be a number");
+                return;
+            }
+
+            Log.d(TAG, "setNotificationFrequency: Setting notification frequency to: " + minutes + " minutes");
             
-            SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            prefs.edit()
-                .putLong("notificationFrequency", frequency)
-                .apply();
+            SharedPreferences.Editor editor = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
+            editor.putLong(KEY_NOTIFICATION_FREQUENCY, minutes);
+            editor.apply();
             
             Log.d(TAG, "Notification frequency updated successfully");
             call.resolve();
         } catch (Exception e) {
             Log.e(TAG, "Error setting notification frequency", e);
-            call.reject("Failed to set notification frequency: " + e.getMessage(), e);
+            call.reject("Failed to set notification frequency: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void getNotificationFrequency(PluginCall call) {
+        try {
+            SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            long frequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 15L);
+            Log.d(TAG, "Getting notification frequency: " + frequency + " minutes");
+            
+            JSObject ret = new JSObject();
+            ret.put("value", frequency);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting notification frequency", e);
+            call.reject("Failed to get notification frequency: " + e.getMessage());
         }
     }
 
@@ -1729,6 +1769,38 @@ public class AppUsageTracker extends Plugin {
                 Log.e(TAG, "Error migrating screen time value", e2);
                 return 0f;
             }
+        }
+    }
+
+    /**
+     * Static method to get notification frequency that doesn't rely on Plugin context
+     */
+    public static int getNotificationFrequencyStatic(Context context) {
+        try {
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            // First try to get it as a long since that's how it's stored
+            long frequencyLong = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 15L); // Default to 15 minutes
+            // Convert to int since that's what the app expects
+            return (int) frequencyLong;
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting notification frequency", e);
+            return 15; // Default to 15 minutes if there's an error
+        }
+    }
+
+    /**
+     * Static method to set notification frequency
+     */
+    public static void setNotificationFrequencyStatic(Context context, int frequencyMinutes) {
+        try {
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            SharedPreferences.Editor editor = prefs.edit();
+            // Store as long to maintain consistency
+            editor.putLong(KEY_NOTIFICATION_FREQUENCY, (long) frequencyMinutes);
+            editor.apply();
+            Log.d(TAG, "Notification frequency set to: " + frequencyMinutes + " minutes");
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting notification frequency", e);
         }
     }
 } 
