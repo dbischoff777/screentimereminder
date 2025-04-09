@@ -423,7 +423,15 @@ public class AppUsageTracker extends Plugin {
             float totalTime = 0;
             if (data.has("totalTime")) {
                 totalTime = (float) data.getDouble("totalTime");
+                
+                // Store the Capacitor value with timestamp
+                SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+                SharedPreferences.Editor editor = prefs.edit();
+                editor.putFloat("capacitorScreenTime", totalTime);
+                editor.putLong("lastCapacitorUpdate", System.currentTimeMillis());
+                editor.apply();
             }
+            
             int limit = data.getInteger("limit", 60);
             
             // Save the limit to SharedPreferences

@@ -71,19 +71,25 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
             // Get SharedPreferences
             SharedPreferences prefs = context.getSharedPreferences(AppUsageTracker.PREFS_NAME, Context.MODE_PRIVATE);
             
-            // Check if we have a recent screen time value
-            long lastUpdate = prefs.getLong(AppUsageTracker.KEY_LAST_UPDATE, 0);
-            long now = System.currentTimeMillis();
+            // Get the most recent screen time value
             float totalScreenTime;
             
-            // If we have a recent update (less than 30 seconds old), use the stored value
-            if (now - lastUpdate < 30000) {
-                totalScreenTime = prefs.getFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, 0f);
-                Log.d(TAG, "Using cached screen time: " + totalScreenTime + " minutes (last update: " + (now - lastUpdate) + "ms ago)");
+            // First check if we have a value from Capacitor/web interface
+            if (prefs.contains("lastCapacitorUpdate")) {
+                long lastCapacitorUpdate = prefs.getLong("lastCapacitorUpdate", 0);
+                long lastNativeUpdate = prefs.getLong(AppUsageTracker.KEY_LAST_UPDATE, 0);
+                
+                // Use Capacitor value if it's more recent
+                if (lastCapacitorUpdate > lastNativeUpdate) {
+                    totalScreenTime = prefs.getFloat("capacitorScreenTime", 0f);
+                    Log.d(TAG, "Using Capacitor screen time value: " + totalScreenTime + " minutes");
+                } else {
+                    totalScreenTime = prefs.getFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, 0f);
+                    Log.d(TAG, "Using native screen time value: " + totalScreenTime + " minutes");
+                }
             } else {
-                // Otherwise get fresh value from AppUsageTracker
-                totalScreenTime = AppUsageTracker.getTotalScreenTimeStatic(context);
-                Log.d(TAG, "Using fresh screen time value: " + totalScreenTime + " minutes");
+                totalScreenTime = prefs.getFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, 0f);
+                Log.d(TAG, "Using stored screen time value: " + totalScreenTime + " minutes");
             }
             
             // Get the screen time limit
