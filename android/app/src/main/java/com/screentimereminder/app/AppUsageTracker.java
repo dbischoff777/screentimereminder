@@ -62,7 +62,7 @@ public class AppUsageTracker extends Plugin {
     private static AppUsageTracker instance;
     private Context context;
     private long screenTimeLimit = 120; // Default 120 minutes
-    private int notificationFrequency = 15; // Default 15 minutes
+    private int notificationFrequency = 5; // Default 5 minutes
     private UsageStatsManager usageStatsManager;
     private ScheduledExecutorService scheduler;
     private String currentForegroundApp = "";
@@ -418,7 +418,7 @@ public class AppUsageTracker extends Plugin {
             int limit = data.getInteger("limit", 60);
             int notificationFrequency = data.getInteger("notificationFrequency", 5);
             
-            SharedPreferences prefs = getContext().getSharedPreferences("ScreenTimeReminder", Context.MODE_PRIVATE);
+            SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             long lastLimitReached = prefs.getLong("lastLimitReachedNotification", 0);
             long lastApproachingLimit = prefs.getLong("lastApproachingLimitNotification", 0);
             long currentTime = System.currentTimeMillis();
@@ -438,7 +438,8 @@ public class AppUsageTracker extends Plugin {
                 if (currentTime - lastLimitReached >= NOTIFICATION_COOLDOWN) {
                     // Show limit reached notification
                     showNotification("Screen Time Limit Reached", 
-                        "You have reached your daily screen time limit of " + limit + " minutes.");
+                        String.format("You have reached your daily limit of %d minutes.\nCurrent usage: %d minutes", 
+                            limit, Math.round(totalTime)));
                     
                     // Update last limit reached timestamp
                     prefs.edit().putLong("lastLimitReachedNotification", currentTime).apply();
@@ -449,7 +450,8 @@ public class AppUsageTracker extends Plugin {
                 if (currentTime - lastApproachingLimit >= NOTIFICATION_COOLDOWN) {
                     // Show approaching limit notification
                     showNotification("Approaching Screen Time Limit", 
-                        "You have " + Math.round(remainingMinutes) + " minutes remaining.");
+                        String.format("You have %d minutes remaining.\nCurrent usage: %d minutes\nDaily limit: %d minutes", 
+                            Math.round(remainingMinutes), Math.round(totalTime), limit));
                     
                     // Update last approaching limit timestamp
                     prefs.edit().putLong("lastApproachingLimitNotification", currentTime).apply();
@@ -473,7 +475,7 @@ public class AppUsageTracker extends Plugin {
             long lastLimitReached = prefs.getLong(KEY_LAST_LIMIT_NOTIFICATION, 0);
             long lastApproachingLimit = prefs.getLong(KEY_LAST_APPROACHING_NOTIFICATION, 0);
             long screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, 60);
-            long notificationFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5);
+            long notificationFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 15);
             float totalScreenTime = getSafeScreenTime(prefs); // Use our safe method here
             
             // If timestamps are 0, set them to current time
@@ -1143,7 +1145,7 @@ public class AppUsageTracker extends Plugin {
     public void getNotificationFrequency(PluginCall call) {
         try {
             SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            long frequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 15L);
+            long frequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L);
             Log.d(TAG, "Getting notification frequency: " + frequency + " minutes");
             
             JSObject ret = new JSObject();
@@ -1221,11 +1223,8 @@ public class AppUsageTracker extends Plugin {
 
     private void showLimitReachedNotification(int totalMinutes) {
         try {
-            // Get current total screen time
-            int totalScreenTime = getTotalScreenTimeStatic(getContext());
-            
             // Format the time
-            String timeString = formatTime(totalScreenTime);
+            String timeString = formatTime(totalMinutes);
             String limitString = formatTime((int)screenTimeLimit);
             
             // Create the notification message
@@ -1254,7 +1253,7 @@ public class AppUsageTracker extends Plugin {
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT);
             
             notificationManager.notify(1, builder.build());
-            Log.d(TAG, "Showing notification: " + notificationMessage);
+            Log.d(TAG, "Showing limit reached notification: " + notificationMessage);
         } catch (Exception e) {
             Log.e(TAG, "Error showing notification", e);
         }
@@ -1262,11 +1261,8 @@ public class AppUsageTracker extends Plugin {
 
     private void showApproachingLimitNotification(int totalMinutes) {
         try {
-            // Get current total screen time
-            int totalScreenTime = getTotalScreenTimeStatic(getContext());
-            
             // Format the time
-            String timeString = formatTime(totalScreenTime);
+            String timeString = formatTime(totalMinutes);
             String limitString = formatTime((int)screenTimeLimit);
             String remainingString = formatTime((int)(screenTimeLimit - totalMinutes));
             
@@ -1297,7 +1293,7 @@ public class AppUsageTracker extends Plugin {
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT);
             
             notificationManager.notify(2, builder.build());
-            Log.d(TAG, "Showing notification: " + notificationMessage);
+            Log.d(TAG, "Showing approaching limit notification: " + notificationMessage);
         } catch (Exception e) {
             Log.e(TAG, "Error showing notification", e);
         }
@@ -1793,12 +1789,13 @@ public class AppUsageTracker extends Plugin {
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             // First try to get it as a long since that's how it's stored
-            long frequencyLong = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 15L); // Default to 15 minutes
+            long frequencyLong = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L); // Default to 5 minutes
+            Log.d(TAG, "Getting notification frequency: " + frequencyLong + " minutes");
             // Convert to int since that's what the app expects
             return (int) frequencyLong;
         } catch (Exception e) {
             Log.e(TAG, "Error getting notification frequency", e);
-            return 15; // Default to 15 minutes if there's an error
+            return 5; // Default to 5 minutes if there's an error
         }
     }
 
@@ -1807,12 +1804,13 @@ public class AppUsageTracker extends Plugin {
      */
     public static void setNotificationFrequencyStatic(Context context, int frequencyMinutes) {
         try {
+            Log.d(TAG, "Setting notification frequency to: " + frequencyMinutes + " minutes");
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             SharedPreferences.Editor editor = prefs.edit();
             // Store as long to maintain consistency
             editor.putLong(KEY_NOTIFICATION_FREQUENCY, (long) frequencyMinutes);
             editor.apply();
-            Log.d(TAG, "Notification frequency set to: " + frequencyMinutes + " minutes");
+            Log.d(TAG, "Successfully saved notification frequency");
         } catch (Exception e) {
             Log.e(TAG, "Error setting notification frequency", e);
         }

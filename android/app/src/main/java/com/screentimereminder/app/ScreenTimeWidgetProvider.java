@@ -6,43 +6,51 @@ import android.appwidget.AppWidgetProvider;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.util.Log;
 import android.widget.RemoteViews;
-import java.util.Map;
+import org.json.JSONObject;
 
 public class ScreenTimeWidgetProvider extends AppWidgetProvider {
     private static final String TAG = "ScreenTimeWidget";
-    private static final String PREFS_NAME = "ScreenTimeReminder";
-    private static final String KEY_SCREEN_TIME_LIMIT = "screenTimeLimit";
-    private static final String KEY_TOTAL_SCREEN_TIME = "totalScreenTime";
+    private static final String ACTION_REFRESH_WIDGET = "com.screentimereminder.app.REFRESH_WIDGET";
 
     @Override
     public void onReceive(Context context, Intent intent) {
         super.onReceive(context, intent);
-        Log.d(TAG, "Received action: " + intent.getAction());
+        String action = intent.getAction();
+        Log.d(TAG, "Received action: " + action);
 
-        if (intent.getAction() != null) {
-            if (intent.getAction().equals("com.screentimereminder.app.REFRESH_WIDGET")) {
+        if (action != null) {
+            if (action.equals(ACTION_REFRESH_WIDGET) || 
+                action.equals("android.appwidget.action.APPWIDGET_UPDATE")) {
                 // Get AppWidget ids
                 AppWidgetManager appWidgetManager = AppWidgetManager.getInstance(context);
                 ComponentName thisWidget = new ComponentName(context, ScreenTimeWidgetProvider.class);
                 int[] appWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget);
                 
-                Log.d(TAG, "Manually refreshing widgets: " + appWidgetIds.length);
+                Log.d(TAG, "Refreshing widgets: " + appWidgetIds.length);
                 
                 // Update all widgets
                 onUpdate(context, appWidgetManager, appWidgetIds);
-            } else if (intent.getAction().equals("android.appwidget.action.APPWIDGET_UPDATE")) {
-                // Get AppWidget ids
-                AppWidgetManager appWidgetManager = AppWidgetManager.getInstance(context);
-                ComponentName thisWidget = new ComponentName(context, ScreenTimeWidgetProvider.class);
-                int[] appWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget);
-                
-                Log.d(TAG, "System requested widget update: " + appWidgetIds.length);
-                
-                // Update all widgets
-                onUpdate(context, appWidgetManager, appWidgetIds);
+            } else if (action.equals("com.screentimereminder.app.APP_USAGE_UPDATE")) {
+                try {
+                    // Check if this is a refresh trigger
+                    String usageData = intent.getStringExtra("usageData");
+                    if (usageData != null) {
+                        JSONObject data = new JSONObject(usageData);
+                        if (data.has("action") && data.getString("action").equals("REFRESH_WIDGET")) {
+                            Log.d(TAG, "Received refresh trigger from WidgetService");
+                            // Trigger widget refresh
+                            AppWidgetManager appWidgetManager = AppWidgetManager.getInstance(context);
+                            ComponentName thisWidget = new ComponentName(context, ScreenTimeWidgetProvider.class);
+                            int[] appWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget);
+                            onUpdate(context, appWidgetManager, appWidgetIds);
+                            return;
+                        }
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error handling usage update", e);
+                }
             }
         }
     }
@@ -59,22 +67,13 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_layout);
 
         try {
-            // Get data from shared preferences
-            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            
-            // Log all relevant preferences
-            Map<String, ?> allPrefs = prefs.getAll();
-            Log.d(TAG, "All SharedPreferences values from " + PREFS_NAME + ":");
-            for (Map.Entry<String, ?> entry : allPrefs.entrySet()) {
-                Log.d(TAG, entry.getKey() + ": " + entry.getValue() + " (" + (entry.getValue() != null ? entry.getValue().getClass().getSimpleName() : "null") + ")");
-            }
-            
-            // Get total screen time and limit using AppUsageTracker's static methods
-            float totalScreenTime = prefs.getFloat(KEY_TOTAL_SCREEN_TIME, 0f);
-            
-            // Get screen time limit using AppUsageTracker's static method for consistency
+            // Get all data from AppUsageTracker
+            float totalScreenTime = AppUsageTracker.getTotalScreenTimeStatic(context);
             long screenTimeLimit = AppUsageTracker.getScreenTimeLimitStatic(context);
-            Log.d(TAG, "Retrieved screen time limit from AppUsageTracker: " + screenTimeLimit);
+
+            // Log the values for debugging
+            Log.d(TAG, String.format("Retrieved from AppUsageTracker - Total: %.2f minutes, Limit: %d minutes", 
+                totalScreenTime, screenTimeLimit));
 
             // Format the time values
             String usedTimeText = String.format("Used: %s", formatTime((int)Math.round(totalScreenTime)));
@@ -90,9 +89,9 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
             // Update progress bar
             views.setProgressBar(R.id.progress_bar, 100, progressPercent, false);
 
-            // Set up refresh button with custom action
+            // Set up refresh button
             Intent refreshIntent = new Intent(context, ScreenTimeWidgetProvider.class);
-            refreshIntent.setAction("com.screentimereminder.app.REFRESH_WIDGET");
+            refreshIntent.setAction(ACTION_REFRESH_WIDGET);
             PendingIntent refreshPendingIntent = PendingIntent.getBroadcast(
                 context, 
                 appWidgetId, 
