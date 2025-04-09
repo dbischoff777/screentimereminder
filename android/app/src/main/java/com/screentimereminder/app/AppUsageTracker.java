@@ -61,7 +61,8 @@ public class AppUsageTracker extends Plugin {
     
     private static AppUsageTracker instance;
     private Context context;
-    private long screenTimeLimit = 120; // Default 120 minutes
+    private static final long DEFAULT_SCREEN_TIME_LIMIT = 120L; // 2 hours in minutes
+    private long screenTimeLimit = DEFAULT_SCREEN_TIME_LIMIT;
     private int notificationFrequency = 5; // Default 5 minutes
     private UsageStatsManager usageStatsManager;
     private ScheduledExecutorService scheduler;
@@ -82,7 +83,8 @@ public class AppUsageTracker extends Plugin {
 
     private void loadScreenTimeLimit() {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, 120);
+        screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+        Log.d(TAG, "Loaded screen time limit: " + screenTimeLimit);
     }
 
     private void initialize(Context context) {
@@ -469,7 +471,7 @@ public class AppUsageTracker extends Plugin {
             // Get values with correct types
             long lastLimitReached = prefs.getLong(KEY_LAST_LIMIT_NOTIFICATION, 0);
             long lastApproachingLimit = prefs.getLong(KEY_LAST_APPROACHING_NOTIFICATION, 0);
-            long screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, 60);
+            long screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
             long notificationFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 15);
             float totalScreenTime = getSafeScreenTime(prefs); // Use our safe method here
             
@@ -1175,7 +1177,7 @@ public class AppUsageTracker extends Plugin {
             // Get the stored values directly from SharedPreferences
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             float totalScreenTime = getSafeScreenTime(prefs);
-            long screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, 120);
+            long screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
 
             // Create JSON object with the data
             JSONObject data = new JSONObject();
@@ -1630,38 +1632,22 @@ public class AppUsageTracker extends Plugin {
     public static int getScreenTimeLimitStatic(Context context) {
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            boolean userHasSetLimit = prefs.getBoolean("userHasSetLimit", false);
             
-            // First try to get it as a long (preferred storage type)
-            try {
-                long limitLong = prefs.getLong(KEY_SCREEN_TIME_LIMIT, 120L);
-                Log.d(TAG, "Got screen time limit as long: " + limitLong);
-                return (int) limitLong;
-            } catch (ClassCastException e) {
-                // If stored as float/int, try to recover
-                try {
-                    float limitFloat = prefs.getFloat(KEY_SCREEN_TIME_LIMIT, 120f);
-                    Log.d(TAG, "Got screen time limit as float: " + limitFloat);
-                    return Math.round(limitFloat);
-                } catch (ClassCastException e2) {
-                    try {
-                        int limitInt = prefs.getInt(KEY_SCREEN_TIME_LIMIT, 120);
-                        Log.d(TAG, "Got screen time limit as int: " + limitInt);
-                        
-                        // Store it back as long for consistency
-                        SharedPreferences.Editor editor = prefs.edit();
-                        editor.putLong(KEY_SCREEN_TIME_LIMIT, limitInt);
-                        editor.apply();
-                        
-                        return limitInt;
-                    } catch (ClassCastException e3) {
-                        Log.e(TAG, "Could not read screen time limit as any numeric type", e3);
-                        return 120; // Default to 120 minutes (2 hours)
-                    }
-                }
+            // If user has set a limit, always return that value
+            if (userHasSetLimit) {
+                long limit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+                Log.d(TAG, "getScreenTimeLimitStatic: Retrieved user-set limit: " + limit);
+                return (int) limit;
             }
+            
+            // Only use default value if user hasn't set a limit yet
+            long limit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+            Log.d(TAG, "getScreenTimeLimitStatic: Retrieved default limit: " + limit);
+            return (int) limit;
         } catch (Exception e) {
             Log.e(TAG, "Error getting screen time limit", e);
-            return 120; // Default to 120 minutes (2 hours)
+            return (int) DEFAULT_SCREEN_TIME_LIMIT;
         }
     }
 
@@ -1672,13 +1658,14 @@ public class AppUsageTracker extends Plugin {
         try {
             Log.d(TAG, "setScreenTimeLimitStatic: Setting screen time limit to: " + limitMinutes + " minutes");
             
-            // Update SharedPreferences
+            // Always store as long
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             SharedPreferences.Editor editor = prefs.edit();
             editor.putLong(KEY_SCREEN_TIME_LIMIT, (long) limitMinutes);
+            editor.putBoolean("userHasSetLimit", true); // Add flag to indicate user has set a value
             editor.apply();
 
-            // Update widget
+            // Update widget immediately
             Intent updateIntent = new Intent(context, ScreenTimeWidgetProvider.class);
             updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
             int[] ids = AppWidgetManager.getInstance(context)
@@ -1686,7 +1673,7 @@ public class AppUsageTracker extends Plugin {
             updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
             context.sendBroadcast(updateIntent);
 
-            // Also broadcast a general update
+            // Broadcast update
             Intent broadcastIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
             JSONObject updateData = new JSONObject();
             updateData.put("screenTimeLimit", limitMinutes);
@@ -1719,7 +1706,7 @@ public class AppUsageTracker extends Plugin {
     public void getScreenTimeLimit(PluginCall call) {
         try {
             SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            long limit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, 1L);
+            long limit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
             Log.d(TAG, "Getting screen time limit: " + limit + " minutes");
             
             JSObject ret = new JSObject();
