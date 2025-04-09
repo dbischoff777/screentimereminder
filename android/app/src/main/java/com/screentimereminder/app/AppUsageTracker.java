@@ -51,7 +51,7 @@ import android.content.ComponentName;
 @CapacitorPlugin(name = "AppUsageTracker")
 public class AppUsageTracker extends Plugin {
     private static final String TAG = "AppUsageTracker";
-    private static final String PREFS_NAME = "ScreenTimeReminder";
+    public static final String PREFS_NAME = "ScreenTimeReminder";
     public static final String KEY_SCREEN_TIME_LIMIT = "screenTimeLimit";
     private static final String KEY_TOTAL_SCREEN_TIME = "totalScreenTime";
     private static final String KEY_LAST_UPDATE = "lastUpdateTime";
@@ -61,7 +61,7 @@ public class AppUsageTracker extends Plugin {
     
     private static AppUsageTracker instance;
     private Context context;
-    private static final long DEFAULT_SCREEN_TIME_LIMIT = 120L; // 2 hours in minutes
+    public static final long DEFAULT_SCREEN_TIME_LIMIT = 120L; // 2 hours in minutes
     private long screenTimeLimit = DEFAULT_SCREEN_TIME_LIMIT;
     private int notificationFrequency = 5; // Default 5 minutes
     private UsageStatsManager usageStatsManager;
@@ -83,8 +83,15 @@ public class AppUsageTracker extends Plugin {
 
     private void loadScreenTimeLimit() {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-        Log.d(TAG, "Loaded screen time limit: " + screenTimeLimit);
+        boolean userHasSetLimit = prefs.getBoolean("userHasSetLimit", false);
+        
+        if (userHasSetLimit) {
+            screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+            Log.d(TAG, "Loaded user-set screen time limit: " + screenTimeLimit);
+        } else {
+            screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+            Log.d(TAG, "Loaded default screen time limit: " + screenTimeLimit);
+        }
     }
 
     private void initialize(Context context) {
@@ -419,7 +426,22 @@ public class AppUsageTracker extends Plugin {
             }
             int limit = data.getInteger("limit", 60);
             
+            // Save the limit to SharedPreferences
             SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putLong(KEY_SCREEN_TIME_LIMIT, limit);
+            editor.putBoolean("userHasSetLimit", true);
+            editor.apply();
+
+            // Update widget immediately
+            Intent updateIntent = new Intent(getContext(), ScreenTimeWidgetProvider.class);
+            updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
+            int[] ids = AppWidgetManager.getInstance(getContext())
+                .getAppWidgetIds(new ComponentName(getContext(), ScreenTimeWidgetProvider.class));
+            updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+            getContext().sendBroadcast(updateIntent);
+
+            // Continue with notification checks
             long lastLimitReached = prefs.getLong("lastLimitReachedNotification", 0);
             long lastApproachingLimit = prefs.getLong("lastApproachingLimitNotification", 0);
             long currentTime = System.currentTimeMillis();
@@ -1161,6 +1183,7 @@ public class AppUsageTracker extends Plugin {
             
             // Update the preferences
             editor.putLong(KEY_SCREEN_TIME_LIMIT, screenTimeLimit);
+            editor.putBoolean("userHasSetLimit", true); // Add flag to indicate user has set a value
             editor.apply();
             
             // Broadcast the update
@@ -1396,7 +1419,18 @@ public class AppUsageTracker extends Plugin {
     }
 
     public long getScreenTimeLimit() {
-        return screenTimeLimit;
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        boolean userHasSetLimit = prefs.getBoolean("userHasSetLimit", false);
+        
+        if (userHasSetLimit) {
+            long limit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+            Log.d(TAG, "getScreenTimeLimit: Retrieved user-set limit: " + limit);
+            return limit;
+        }
+        
+        long limit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+        Log.d(TAG, "getScreenTimeLimit: Retrieved default limit: " + limit);
+        return limit;
     }
 
     private UsageStatsManager getUsageStatsManager() {
@@ -1706,9 +1740,21 @@ public class AppUsageTracker extends Plugin {
     public void getScreenTimeLimit(PluginCall call) {
         try {
             SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            long limit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-            Log.d(TAG, "Getting screen time limit: " + limit + " minutes");
+            boolean userHasSetLimit = prefs.getBoolean("userHasSetLimit", false);
             
+            // If user has set a limit, always return that value
+            if (userHasSetLimit) {
+                long limit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+                Log.d(TAG, "getScreenTimeLimit: Retrieved user-set limit: " + limit);
+                JSObject ret = new JSObject();
+                ret.put("value", limit);
+                call.resolve(ret);
+                return;
+            }
+            
+            // Only use default value if user hasn't set a limit yet
+            long limit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+            Log.d(TAG, "getScreenTimeLimit: Retrieved default limit: " + limit);
             JSObject ret = new JSObject();
             ret.put("value", limit);
             call.resolve(ret);

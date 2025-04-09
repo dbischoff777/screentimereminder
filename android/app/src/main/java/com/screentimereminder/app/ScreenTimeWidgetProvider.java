@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetProvider;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.util.Log;
 import android.widget.RemoteViews;
 import org.json.JSONObject;
@@ -69,7 +70,19 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
         try {
             // Get all data from AppUsageTracker
             float totalScreenTime = AppUsageTracker.getTotalScreenTimeStatic(context);
-            long screenTimeLimit = AppUsageTracker.getScreenTimeLimitStatic(context);
+            
+            // Get the screen time limit from SharedPreferences directly
+            SharedPreferences prefs = context.getSharedPreferences(AppUsageTracker.PREFS_NAME, Context.MODE_PRIVATE);
+            boolean userHasSetLimit = prefs.getBoolean("userHasSetLimit", false);
+            long screenTimeLimit;
+            
+            if (userHasSetLimit) {
+                screenTimeLimit = prefs.getLong(AppUsageTracker.KEY_SCREEN_TIME_LIMIT, AppUsageTracker.DEFAULT_SCREEN_TIME_LIMIT);
+                Log.d(TAG, "Using user-set screen time limit: " + screenTimeLimit);
+            } else {
+                screenTimeLimit = AppUsageTracker.DEFAULT_SCREEN_TIME_LIMIT;
+                Log.d(TAG, "Using default screen time limit: " + screenTimeLimit);
+            }
 
             // Log the values for debugging
             Log.d(TAG, String.format("Retrieved from AppUsageTracker - Total: %.2f minutes, Limit: %d minutes", 
