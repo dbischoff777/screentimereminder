@@ -751,7 +751,10 @@ public class AppUsageTracker extends Plugin {
                 packageName.equals("com.google.android.gm") ||        // Gmail
                 packageName.equals("com.google.android.youtube") ||   // YouTube
                 packageName.equals("com.google.android.calendar") ||  // Calendar
-                packageName.equals("com.google.android.chrome")) {    // Chrome
+                packageName.equals("com.android.chrome") ||          // Chrome
+                packageName.equals("com.chrome.beta") ||             // Chrome Beta
+                packageName.equals("com.chrome.dev") ||              // Chrome Dev
+                packageName.equals("com.chrome.canary")) {           // Chrome Canary
                 return false;
             }
             
