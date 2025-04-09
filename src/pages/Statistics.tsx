@@ -121,7 +121,7 @@ const Statistics = () => {
     
     // If we have too many apps, only show the top ones that make up 95% of usage
     // or have at least 1% usage time
-    if (allApps.length > 10) {  // Increased from 10 to 15 max apps
+    if (allApps.length > 6) {  // show 6 apps
       let accumulatedPercentage = 0;
       return allApps.filter(app => {
         const percentage = (app.time / totalTime) * 100;
