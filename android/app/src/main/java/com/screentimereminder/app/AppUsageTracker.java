@@ -53,8 +53,8 @@ public class AppUsageTracker extends Plugin {
     private static final String TAG = "AppUsageTracker";
     public static final String PREFS_NAME = "ScreenTimeReminder";
     public static final String KEY_SCREEN_TIME_LIMIT = "screenTimeLimit";
-    private static final String KEY_TOTAL_SCREEN_TIME = "totalScreenTime";
-    private static final String KEY_LAST_UPDATE = "lastUpdateTime";
+    public static final String KEY_TOTAL_SCREEN_TIME = "totalScreenTime";
+    public static final String KEY_LAST_UPDATE = "lastUpdateTime";
     private static final String KEY_LAST_LIMIT_NOTIFICATION = "lastLimitReachedNotification";
     private static final String KEY_LAST_APPROACHING_NOTIFICATION = "lastApproachingLimitNotification";
     private static final String KEY_NOTIFICATION_FREQUENCY = "notificationFrequency";
@@ -1631,7 +1631,7 @@ public class AppUsageTracker extends Plugin {
             // Convert to minutes
             float totalMinutes = totalTimeInForeground / (60f * 1000f);
             
-            // Store the calculated value
+            // Store the calculated value with timestamp
             SharedPreferences.Editor editor = prefs.edit();
             editor.putFloat(KEY_TOTAL_SCREEN_TIME, totalMinutes);
             editor.putLong(KEY_LAST_UPDATE, System.currentTimeMillis());

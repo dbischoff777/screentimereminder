@@ -68,11 +68,25 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_layout);
 
         try {
-            // Get all data from AppUsageTracker
-            float totalScreenTime = AppUsageTracker.getTotalScreenTimeStatic(context);
-            
-            // Get the screen time limit from SharedPreferences directly
+            // Get SharedPreferences
             SharedPreferences prefs = context.getSharedPreferences(AppUsageTracker.PREFS_NAME, Context.MODE_PRIVATE);
+            
+            // Check if we have a recent screen time value
+            long lastUpdate = prefs.getLong(AppUsageTracker.KEY_LAST_UPDATE, 0);
+            long now = System.currentTimeMillis();
+            float totalScreenTime;
+            
+            // If we have a recent update (less than 30 seconds old), use the stored value
+            if (now - lastUpdate < 30000) {
+                totalScreenTime = prefs.getFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, 0f);
+                Log.d(TAG, "Using cached screen time: " + totalScreenTime + " minutes (last update: " + (now - lastUpdate) + "ms ago)");
+            } else {
+                // Otherwise get fresh value from AppUsageTracker
+                totalScreenTime = AppUsageTracker.getTotalScreenTimeStatic(context);
+                Log.d(TAG, "Using fresh screen time value: " + totalScreenTime + " minutes");
+            }
+            
+            // Get the screen time limit
             boolean userHasSetLimit = prefs.getBoolean("userHasSetLimit", false);
             long screenTimeLimit;
             
@@ -85,7 +99,7 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
             }
 
             // Log the values for debugging
-            Log.d(TAG, String.format("Retrieved from AppUsageTracker - Total: %.2f minutes, Limit: %d minutes", 
+            Log.d(TAG, String.format("Retrieved values - Total: %.2f minutes, Limit: %d minutes", 
                 totalScreenTime, screenTimeLimit));
 
             // Format the time values
