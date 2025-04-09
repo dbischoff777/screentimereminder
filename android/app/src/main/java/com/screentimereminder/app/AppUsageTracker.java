@@ -416,46 +416,41 @@ public class AppUsageTracker extends Plugin {
                 totalTime = (float) data.getDouble("totalTime");
             }
             int limit = data.getInteger("limit", 60);
-            int notificationFrequency = data.getInteger("notificationFrequency", 5);
             
             SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             long lastLimitReached = prefs.getLong("lastLimitReachedNotification", 0);
             long lastApproachingLimit = prefs.getLong("lastApproachingLimitNotification", 0);
             long currentTime = System.currentTimeMillis();
             
-            // Calculate remaining time
-            float remainingMinutes = limit - totalTime;
+            // Calculate percentage of limit
+            float percentOfLimit = (totalTime / limit) * 100;
             
             // Update total screen time
             prefs.edit().putFloat("totalScreenTime", totalTime).apply();
             
-            // Define cooldown period (1 minute in milliseconds)
+            // Define cooldown period (60 seconds)
             long NOTIFICATION_COOLDOWN = 60 * 1000;
             
             // Check if we should show notifications
-            if (remainingMinutes <= 0) {
-                // Check if enough time has passed since last limit reached notification
+            if (percentOfLimit >= 100) {
+                // Check cooldown for limit reached notification
                 if (currentTime - lastLimitReached >= NOTIFICATION_COOLDOWN) {
-                    // Show limit reached notification
                     showNotification("Screen Time Limit Reached", 
                         String.format("You have reached your daily limit of %d minutes.\nCurrent usage: %d minutes", 
                             limit, Math.round(totalTime)));
                     
-                    // Update last limit reached timestamp
                     prefs.edit().putLong("lastLimitReachedNotification", currentTime).apply();
-                    Log.d(TAG, "Updated lastLimitReachedNotification to: " + currentTime);
+                    Log.d(TAG, "Sent limit reached notification at " + percentOfLimit + "% of limit");
                 }
-            } else if (remainingMinutes <= notificationFrequency) {
-                // Check if enough time has passed since last approaching limit notification
+            } else if (percentOfLimit >= 90) {
+                // Check cooldown for approaching limit notification
                 if (currentTime - lastApproachingLimit >= NOTIFICATION_COOLDOWN) {
-                    // Show approaching limit notification
                     showNotification("Approaching Screen Time Limit", 
                         String.format("You have %d minutes remaining.\nCurrent usage: %d minutes\nDaily limit: %d minutes", 
-                            Math.round(remainingMinutes), Math.round(totalTime), limit));
+                            Math.round(limit - totalTime), Math.round(totalTime), limit));
                     
-                    // Update last approaching limit timestamp
                     prefs.edit().putLong("lastApproachingLimitNotification", currentTime).apply();
-                    Log.d(TAG, "Updated lastApproachingLimitNotification to: " + currentTime);
+                    Log.d(TAG, "Sent approaching limit notification at " + percentOfLimit + "% of limit");
                 }
             }
             
