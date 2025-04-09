@@ -1,10 +1,11 @@
-import { Container, Title, Text, Grid, Tabs, Paper, Card, Badge, Stack, Group } from '@mantine/core';
+import { Container, Title, Text, Grid, Tabs, Paper, Card, Badge, Stack, Group, Button, Modal, Loader } from '@mantine/core';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect } from 'react';
 import FocusTimer from '../components/FocusTimer';
 import { EmailReportSettings, EmailSettings } from '../components/EmailReportSettings';
 import { ReportScheduler } from '../services/reportScheduler';
 import { notifications } from '@mantine/notifications';
+import { usePurchases } from '../hooks/usePurchases';
 
 const DetailedAnalytics = () => {
   const { 
@@ -12,8 +13,11 @@ const DetailedAnalytics = () => {
     getTotalScreenTime, 
     screenTimeLimit
   } = useScreenTime();
+  const { loading, purchaseProduct, isTabUnlocked } = usePurchases();
   const [totalScreenTime, setTotalScreenTime] = useState(0);
   const [activeTab, setActiveTab] = useState<string | null>('heatmap');
+  const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
+  const [selectedTab, setSelectedTab] = useState<string | null>(null);
 
   // Add focus session tracking
   const [focusSessions, setFocusSessions] = useState<{
@@ -302,6 +306,26 @@ const DetailedAnalytics = () => {
     }
   };
 
+  const handleTabChange = (tab: string | null) => {
+    if (!tab) return;
+    
+    const tabId = `${tab}_tab`;
+    if (isTabUnlocked(tabId)) {
+      setActiveTab(tab);
+    } else {
+      setSelectedTab(tab);
+      setPurchaseModalOpen(true);
+    }
+  };
+
+  const handlePurchase = async (productId: string) => {
+    const success = await purchaseProduct(productId);
+    if (success && selectedTab) {
+      setActiveTab(selectedTab);
+      setPurchaseModalOpen(false);
+    }
+  };
+
   return (
     <Container 
       size="md" 
@@ -331,7 +355,7 @@ const DetailedAnalytics = () => {
 
       <Tabs
         value={activeTab}
-        onChange={setActiveTab}
+        onChange={handleTabChange}
         defaultValue="heatmap"
         style={{ marginBottom: '2rem' }}
         styles={{
@@ -382,6 +406,13 @@ const DetailedAnalytics = () => {
             },
             '&:hover': {
               backgroundColor: 'rgba(255, 0, 255, 0.05)',
+            },
+            '&[data-locked]': {
+              color: '#666666',
+              cursor: 'pointer',
+              '&:hover': {
+                backgroundColor: 'rgba(255, 0, 255, 0.05)',
+              }
             }
           },
           panel: {
@@ -398,11 +429,36 @@ const DetailedAnalytics = () => {
         }}
       >
         <Tabs.List>
-          <Tabs.Tab value="heatmap">HEATMAP</Tabs.Tab>
-          <Tabs.Tab value="timeline">TIMELINE</Tabs.Tab>
-          <Tabs.Tab value="insights">INSIGHTS</Tabs.Tab>
-          <Tabs.Tab value="details">DETAILS</Tabs.Tab>
-          <Tabs.Tab value="focus">FOCUS</Tabs.Tab>
+          <Tabs.Tab 
+            value="heatmap"
+            data-locked={!isTabUnlocked('heatmap_tab')}
+          >
+            HEATMAP {!isTabUnlocked('heatmap_tab') && '🔒'}
+          </Tabs.Tab>
+          <Tabs.Tab 
+            value="timeline"
+            data-locked={!isTabUnlocked('timeline_tab')}
+          >
+            TIMELINE {!isTabUnlocked('timeline_tab') && '🔒'}
+          </Tabs.Tab>
+          <Tabs.Tab 
+            value="insights"
+            data-locked={!isTabUnlocked('insights_tab')}
+          >
+            INSIGHTS {!isTabUnlocked('insights_tab') && '🔒'}
+          </Tabs.Tab>
+          <Tabs.Tab 
+            value="details"
+            data-locked={!isTabUnlocked('details_tab')}
+          >
+            DETAILS {!isTabUnlocked('details_tab') && '🔒'}
+          </Tabs.Tab>
+          <Tabs.Tab 
+            value="focus"
+            data-locked={!isTabUnlocked('focus_tab')}
+          >
+            FOCUS {!isTabUnlocked('focus_tab') && '🔒'}
+          </Tabs.Tab>
           <Tabs.Tab value="settings">REPORT</Tabs.Tab>
         </Tabs.List>
 
@@ -1170,6 +1226,73 @@ const DetailedAnalytics = () => {
           </div>
         </Tabs.Panel>
       </Tabs>
+
+      {/* Purchase Modal */}
+      <Modal
+        opened={purchaseModalOpen}
+        onClose={() => setPurchaseModalOpen(false)}
+        title="Unlock Advanced Features"
+        styles={{
+          title: {
+            color: '#00FFFF',
+            fontSize: '1.5rem',
+            textAlign: 'center',
+            width: '100%'
+          },
+          content: {
+            background: '#000020',
+            border: '1px solid #FF00FF',
+          },
+          body: {
+            color: '#FFFFFF'
+          }
+        }}
+      >
+        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+          <Text size="lg" style={{ marginBottom: '1rem' }}>
+            Unlock additional features to get deeper insights into your screen time usage.
+          </Text>
+          
+          {loading ? (
+            <Loader color="#00FFFF" />
+          ) : (
+            <Stack>
+              {/* Individual tab purchase */}
+              {selectedTab && (
+                <Button
+                  fullWidth
+                  size="lg"
+                  onClick={() => handlePurchase(`${selectedTab}_tab`)}
+                  style={{
+                    background: 'linear-gradient(45deg, #FF00FF, #00FFFF)',
+                    marginBottom: '1rem'
+                  }}
+                >
+                  Unlock {selectedTab.toUpperCase()} Tab - €1.99
+                </Button>
+              )}
+              
+              {/* Bundle purchase */}
+              <Button
+                fullWidth
+                size="lg"
+                variant="outline"
+                onClick={() => handlePurchase('all_tabs_bundle')}
+                style={{
+                  borderColor: '#FF00FF',
+                  color: '#FF00FF'
+                }}
+              >
+                Unlock All Tabs - €4.99
+              </Button>
+              
+              <Text size="sm" style={{ color: '#AAAAAA', marginTop: '1rem' }}>
+                One-time purchase, no subscription required
+              </Text>
+            </Stack>
+          )}
+        </div>
+      </Modal>
 
       <style>
         {`

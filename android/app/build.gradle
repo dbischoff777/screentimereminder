@@ -31,9 +31,19 @@ android {
         }
     }
     
+    signingConfigs {
+        release {
+            storeFile file("../screentimereminder.keystore")
+            storePassword "BorussiA0990!"
+            keyAlias "screentimereminder"
+            keyPassword "BorussiA0990!"
+        }
+    }
+    
     buildTypes {
         release {
-            minifyEnabled false
+            signingConfig signingConfigs.release
+            minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
@@ -76,6 +86,7 @@ dependencies {
     // Add Google Play Services dependencies
     implementation 'com.google.android.gms:play-services-base:18.3.0'
     implementation 'com.google.android.gms:play-services-location:21.2.0'
+    implementation 'com.android.billingclient:billing:6.1.0'
 }
 
 apply from: 'capacitor.build.gradle'

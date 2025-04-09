@@ -26,6 +26,10 @@ public class MainActivity extends BridgeActivity {
                 // Register the AppUsageTracker plugin
                 this.registerPlugin(AppUsageTracker.class);
                 Log.d(TAG, "AppUsageTracker plugin registered successfully");
+
+                // Register the BillingManager plugin
+                this.registerPlugin(BillingManager.class);
+                Log.d(TAG, "BillingManager plugin registered successfully");
             } catch (Exception e) {
                 Log.e(TAG, "Error registering plugins", e);
             }
