@@ -14,6 +14,10 @@ import org.json.JSONObject;
 public class ScreenTimeWidgetProvider extends AppWidgetProvider {
     private static final String TAG = "ScreenTimeWidget";
     private static final String ACTION_REFRESH_WIDGET = "com.screentimereminder.app.REFRESH_WIDGET";
+    private static final long DEBOUNCE_DELAY = 500; // 500ms debounce
+    private static long lastUpdateTime = 0;
+    private static float lastScreenTime = 0f;
+    private static long lastScreenTimeLimit = 0;
 
     @Override
     public void onReceive(Context context, Intent intent) {
@@ -24,6 +28,15 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
         if (action != null) {
             if (action.equals(ACTION_REFRESH_WIDGET) || 
                 action.equals("android.appwidget.action.APPWIDGET_UPDATE")) {
+                
+                // Check if enough time has passed since last update
+                long now = System.currentTimeMillis();
+                if (now - lastUpdateTime < DEBOUNCE_DELAY) {
+                    Log.d(TAG, "Skipping update due to debounce");
+                    return;
+                }
+                lastUpdateTime = now;
+
                 // Get AppWidget ids
                 AppWidgetManager appWidgetManager = AppWidgetManager.getInstance(context);
                 ComponentName thisWidget = new ComponentName(context, ScreenTimeWidgetProvider.class);
@@ -39,6 +52,15 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
                     String usageData = intent.getStringExtra("usageData");
                     if (usageData != null) {
                         JSONObject data = new JSONObject(usageData);
+                        
+                        // Store the latest values
+                        if (data.has("totalScreenTime")) {
+                            lastScreenTime = (float) data.getDouble("totalScreenTime");
+                        }
+                        if (data.has("screenTimeLimit")) {
+                            lastScreenTimeLimit = data.getLong("screenTimeLimit");
+                        }
+
                         if (data.has("action") && data.getString("action").equals("REFRESH_WIDGET")) {
                             Log.d(TAG, "Received refresh trigger from WidgetService");
                             // Trigger widget refresh
@@ -73,28 +95,32 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
             
             // Get the most recent screen time value
             float totalScreenTime;
+            long screenTimeLimit;
             
             // First check if we have a value from Capacitor/web interface
             if (prefs.contains("lastCapacitorUpdate")) {
                 long lastCapacitorUpdate = prefs.getLong("lastCapacitorUpdate", 0);
                 long lastNativeUpdate = prefs.getLong(AppUsageTracker.KEY_LAST_UPDATE, 0);
                 
-                // Use Capacitor value if it's more recent
-                if (lastCapacitorUpdate > lastNativeUpdate) {
-                    totalScreenTime = prefs.getFloat("capacitorScreenTime", 0f);
+                // Use most recent value between Capacitor, stored value, and last known value
+                if (lastCapacitorUpdate > lastNativeUpdate && lastCapacitorUpdate > lastUpdateTime) {
+                    totalScreenTime = prefs.getFloat("capacitorScreenTime", lastScreenTime);
                     Log.d(TAG, "Using Capacitor screen time value: " + totalScreenTime + " minutes");
+                } else if (lastUpdateTime > lastCapacitorUpdate && lastUpdateTime > lastNativeUpdate) {
+                    totalScreenTime = lastScreenTime;
+                    Log.d(TAG, "Using last known screen time value: " + totalScreenTime + " minutes");
                 } else {
-                    totalScreenTime = prefs.getFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, 0f);
+                    totalScreenTime = prefs.getFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, lastScreenTime);
                     Log.d(TAG, "Using native screen time value: " + totalScreenTime + " minutes");
                 }
             } else {
-                totalScreenTime = prefs.getFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, 0f);
+                totalScreenTime = Math.max(lastScreenTime, 
+                    prefs.getFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, 0f));
                 Log.d(TAG, "Using stored screen time value: " + totalScreenTime + " minutes");
             }
             
             // Get the screen time limit
             boolean userHasSetLimit = prefs.getBoolean("userHasSetLimit", false);
-            long screenTimeLimit;
             
             if (userHasSetLimit) {
                 screenTimeLimit = prefs.getLong(AppUsageTracker.KEY_SCREEN_TIME_LIMIT, AppUsageTracker.DEFAULT_SCREEN_TIME_LIMIT);
@@ -103,6 +129,10 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
                 screenTimeLimit = AppUsageTracker.DEFAULT_SCREEN_TIME_LIMIT;
                 Log.d(TAG, "Using default screen time limit: " + screenTimeLimit);
             }
+
+            // Store the values for next comparison
+            lastScreenTime = totalScreenTime;
+            lastScreenTimeLimit = screenTimeLimit;
 
             // Log the values for debugging
             Log.d(TAG, String.format("Retrieved values - Total: %.2f minutes, Limit: %d minutes", 
