@@ -93,42 +93,13 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
             // Get SharedPreferences
             SharedPreferences prefs = context.getSharedPreferences(AppUsageTracker.PREFS_NAME, Context.MODE_PRIVATE);
             
-            // Get the most recent screen time value
-            float totalScreenTime;
-            long screenTimeLimit;
-            
-            // First check if we have a value from Capacitor/web interface
-            if (prefs.contains("lastCapacitorUpdate")) {
-                long lastCapacitorUpdate = prefs.getLong("lastCapacitorUpdate", 0);
-                long lastNativeUpdate = prefs.getLong(AppUsageTracker.KEY_LAST_UPDATE, 0);
-                
-                // Use most recent value between Capacitor, stored value, and last known value
-                if (lastCapacitorUpdate > lastNativeUpdate && lastCapacitorUpdate > lastUpdateTime) {
-                    totalScreenTime = prefs.getFloat("capacitorScreenTime", lastScreenTime);
-                    Log.d(TAG, "Using Capacitor screen time value: " + totalScreenTime + " minutes");
-                } else if (lastUpdateTime > lastCapacitorUpdate && lastUpdateTime > lastNativeUpdate) {
-                    totalScreenTime = lastScreenTime;
-                    Log.d(TAG, "Using last known screen time value: " + totalScreenTime + " minutes");
-                } else {
-                    totalScreenTime = prefs.getFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, lastScreenTime);
-                    Log.d(TAG, "Using native screen time value: " + totalScreenTime + " minutes");
-                }
-            } else {
-                totalScreenTime = Math.max(lastScreenTime, 
-                    prefs.getFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, 0f));
-                Log.d(TAG, "Using stored screen time value: " + totalScreenTime + " minutes");
-            }
+            // Get the screen time value from Capacitor
+            float totalScreenTime = prefs.getFloat("capacitorScreenTime", 0f);
+            long lastCapacitorUpdate = prefs.getLong("lastCapacitorUpdate", 0);
             
             // Get the screen time limit
-            boolean userHasSetLimit = prefs.getBoolean("userHasSetLimit", false);
-            
-            if (userHasSetLimit) {
-                screenTimeLimit = prefs.getLong(AppUsageTracker.KEY_SCREEN_TIME_LIMIT, AppUsageTracker.DEFAULT_SCREEN_TIME_LIMIT);
-                Log.d(TAG, "Using user-set screen time limit: " + screenTimeLimit);
-            } else {
-                screenTimeLimit = AppUsageTracker.DEFAULT_SCREEN_TIME_LIMIT;
-                Log.d(TAG, "Using default screen time limit: " + screenTimeLimit);
-            }
+            long screenTimeLimit = prefs.getLong(AppUsageTracker.KEY_SCREEN_TIME_LIMIT, AppUsageTracker.DEFAULT_SCREEN_TIME_LIMIT);
+            Log.d(TAG, "Using screen time limit: " + screenTimeLimit);
 
             // Store the values for next comparison
             lastScreenTime = totalScreenTime;

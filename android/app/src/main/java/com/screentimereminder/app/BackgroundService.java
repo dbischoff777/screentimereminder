@@ -286,85 +286,48 @@ public class BackgroundService extends Service {
     }
 
     private void updateAppUsage() {
-        if (isUpdating) {
-            Log.d(TAG, "Update already in progress, skipping");
-            return;
-        }
-
-        synchronized (updateLock) {
-            if (isUpdating) return;
-            isUpdating = true;
-        }
-
-        backgroundExecutor.execute(() -> {
-            try {
-                // Get data directly from AppUsageTracker
-                int totalScreenTime = AppUsageTracker.getTotalScreenTimeStatic(this);
-                int screenTimeLimit = AppUsageTracker.getScreenTimeLimitStatic(this);
-
-                // Get detailed app usage data
-                UsageStatsManager usageStatsManager = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
-                if (usageStatsManager != null) {
-                    long startTime = getStartOfDay();
-                    long endTime = System.currentTimeMillis();
-                    
-                    Map<String, UsageStats> stats = usageStatsManager.queryAndAggregateUsageStats(startTime, endTime);
-                    JSONArray appsArray = new JSONArray();
-                    
-                    for (Map.Entry<String, UsageStats> entry : stats.entrySet()) {
-                        String packageName = entry.getKey();
-                        UsageStats usageStats = entry.getValue();
-                        
-                        // Skip system apps and our own app
-                        if (isSystemApp(packageName) || packageName.equals(getPackageName())) {
-                            continue;
-                        }
-                        
-                        // Only include apps that have been used today
-                        if (usageStats.getLastTimeUsed() >= startTime) {
-                            JSONObject appData = new JSONObject();
-                            appData.put("packageName", packageName);
-                            appData.put("name", getAppName(packageName));
-                            appData.put("time", usageStats.getTotalTimeInForeground() / (1000.0 * 60.0)); // Convert to minutes
-                            appData.put("lastUsed", usageStats.getLastTimeUsed());
-                            appData.put("category", getCategoryForApp(getAppName(packageName)));
-                            appData.put("icon", getAppIconBase64(packageName));
-                            
-                            appsArray.put(appData);
-                        }
-                    }
-                    
-                    // Create the complete usage data object
-                    JSONObject usageData = new JSONObject();
-                    usageData.put("totalScreenTime", totalScreenTime);
-                    usageData.put("screenTimeLimit", screenTimeLimit);
-                    usageData.put("timestamp", System.currentTimeMillis());
-                    usageData.put("apps", appsArray);
-                    
-                    // Broadcast the update
-                    Intent updateIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
-                    updateIntent.putExtra("usageData", usageData.toString());
-                    sendBroadcast(updateIntent);
-                    
-                    Log.d(TAG, "App usage updated with " + appsArray.length() + " apps");
-                }
-
-                // Update widget
-                Intent updateWidgetIntent = new Intent(this, ScreenTimeWidgetProvider.class);
-                updateWidgetIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
-                int[] ids = AppWidgetManager.getInstance(this)
-                    .getAppWidgetIds(new ComponentName(this, ScreenTimeWidgetProvider.class));
-                updateWidgetIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
-                sendBroadcast(updateWidgetIntent);
-
-            } catch (Exception e) {
-                Log.e(TAG, "Error updating app usage", e);
-            } finally {
-                synchronized (updateLock) {
-                    isUpdating = false;
-                }
+        try {
+            // Use the static method to ensure consistent calculation
+            int totalMinutes = AppUsageTracker.getTotalScreenTimeStatic(this);
+            float totalTime = totalMinutes;
+            
+            // Get the stored capacitor value
+            SharedPreferences prefs = getSharedPreferences(AppUsageTracker.PREFS_NAME, Context.MODE_PRIVATE);
+            float capacitorTime = prefs.getFloat("capacitorScreenTime", 0);
+            long lastCapacitorUpdate = prefs.getLong("lastCapacitorUpdate", 0);
+            
+            // Use the higher value between native and capacitor, but only if capacitor value is recent (within 5 minutes)
+            float finalTotalTime = totalTime;
+            if (lastCapacitorUpdate > 0 && (System.currentTimeMillis() - lastCapacitorUpdate) < 5 * 60 * 1000) {
+                finalTotalTime = Math.max(totalTime, capacitorTime);
             }
-        });
+            
+            // Update shared preferences
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, finalTotalTime);
+            editor.putLong(AppUsageTracker.KEY_LAST_UPDATE, System.currentTimeMillis());
+            editor.apply();
+            
+            // Broadcast the update
+            Intent broadcastIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
+            JSONObject updateData = new JSONObject();
+            updateData.put("totalScreenTime", finalTotalTime);
+            updateData.put("timestamp", System.currentTimeMillis());
+            broadcastIntent.putExtra("usageData", updateData.toString());
+            sendBroadcast(broadcastIntent);
+            
+            // Update widget
+            Intent updateIntent = new Intent(this, ScreenTimeWidgetProvider.class);
+            updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
+            int[] ids = AppWidgetManager.getInstance(this)
+                .getAppWidgetIds(new ComponentName(this, ScreenTimeWidgetProvider.class));
+            updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+            sendBroadcast(updateIntent);
+            
+            Log.d(TAG, "Updated app usage: " + finalTotalTime + " minutes");
+        } catch (Exception e) {
+            Log.e(TAG, "Error updating app usage", e);
+        }
     }
 
     private void updateAppUsageTime(String packageName, long timeSpent) {
