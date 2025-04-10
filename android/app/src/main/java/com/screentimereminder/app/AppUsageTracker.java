@@ -504,14 +504,16 @@ public class AppUsageTracker extends Plugin {
             // Get current screen time using the same method as Statistics.tsx and widget
             float totalTime = getTodayScreenTime(getContext());
             
-            // Get limit value from call data
+            // Get limit value and notification frequency from call data
             JSObject data = call.getData();
             int limit = data.has("limit") ? data.getInt("limit") : 60;
+            int notificationFrequency = data.has("notificationFrequency") ? data.getInt("notificationFrequency") : 5;
             
-            // Save the limit to SharedPreferences
+            // Save the limit and notification frequency to SharedPreferences
             SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             SharedPreferences.Editor editor = prefs.edit();
             editor.putLong(KEY_SCREEN_TIME_LIMIT, limit);
+            editor.putLong(KEY_NOTIFICATION_FREQUENCY, notificationFrequency);
             editor.putBoolean("userHasSetLimit", true);
             editor.apply();
 
@@ -523,8 +525,8 @@ public class AppUsageTracker extends Plugin {
             // Calculate percentage of limit
             float percentOfLimit = (totalTime / limit) * 100;
             
-            // Define cooldown period (60 seconds)
-            long NOTIFICATION_COOLDOWN = 60 * 1000;
+            // Use the notification frequency from settings
+            long NOTIFICATION_COOLDOWN = notificationFrequency * 60 * 1000;
             
             // Check if we should show notifications
             if (percentOfLimit >= 100) {
