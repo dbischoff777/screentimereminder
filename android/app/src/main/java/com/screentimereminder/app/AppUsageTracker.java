@@ -71,6 +71,8 @@ public class AppUsageTracker extends Plugin {
     private NotificationService notificationService;
     private SharedPreferences prefs;
     private final ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor();
+    private boolean isTracking = false;
+    private long lastUpdateTime = 0;
     
     public static AppUsageTracker getInstance(Context context) {
         if (instance == null) {
@@ -151,7 +153,6 @@ public class AppUsageTracker extends Plugin {
     @PluginMethod
     public void startTracking(PluginCall call) {
         try {
-            // Check if we have permission
             if (!checkUsageStatsPermission()) {
                 call.reject("Usage stats permission not granted");
                 return;
@@ -159,58 +160,121 @@ public class AppUsageTracker extends Plugin {
 
             // Start the background service
             Intent serviceIntent = new Intent(getContext(), BackgroundService.class);
-            serviceIntent.setAction("START_TRACKING");
-            
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Log.d(TAG, "Starting foreground service for Android O and above");
                 getContext().startForegroundService(serviceIntent);
             } else {
-                Log.d(TAG, "Starting service for pre-Android O");
                 getContext().startService(serviceIntent);
             }
 
-            // Schedule periodic updates
+            // Initialize tracking
+            isTracking = true;
+            lastUpdateTime = System.currentTimeMillis();
+            
+            // Start periodic updates
             if (scheduler == null || scheduler.isShutdown()) {
                 scheduler = Executors.newSingleThreadScheduledExecutor();
-                scheduler.scheduleAtFixedRate(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            // Update shared preferences with latest screen time data
-                            updateSharedPreferences();
-                            // Add a small random delay to avoid exact intervals
-                            Thread.sleep((long)(Math.random() * 5000));
-                        } catch (Exception e) {
-                            Log.e(TAG, "Error in update cycle", e);
+                scheduler.scheduleAtFixedRate(() -> {
+                    try {
+                        if (isTracking) {
+                            updateAppUsage();
                         }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error in periodic update", e);
                     }
-                }, 1, 5, TimeUnit.MINUTES); // Check every 5 minutes
+                }, 0, 1, TimeUnit.MINUTES);
             }
 
-            // Request battery optimization exemption
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                PowerManager powerManager = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
-                if (powerManager != null && !powerManager.isIgnoringBatteryOptimizations(getContext().getPackageName())) {
-                    Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-                    intent.setData(android.net.Uri.parse("package:" + getContext().getPackageName()));
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    getContext().startActivity(intent);
-                }
-            }
-
-            // Request usage access permission if not granted
-            if (!checkUsageStatsPermission()) {
-                Intent intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                getContext().startActivity(intent);
-            }
-
-            JSObject ret = new JSObject();
-            ret.put("value", true);
-            call.resolve(ret);
+            call.resolve();
         } catch (Exception e) {
             Log.e(TAG, "Error starting tracking", e);
-            call.reject("Failed to start tracking: " + e.getMessage(), e);
+            call.reject("Failed to start tracking: " + e.getMessage());
+        }
+    }
+    
+    private void updateAppUsage() {
+        try {
+            // Get current usage stats
+            UsageStatsManager usageStatsManager = (UsageStatsManager) getContext().getSystemService(Context.USAGE_STATS_SERVICE);
+            if (usageStatsManager != null) {
+                long startTime = getStartOfDay();
+                long endTime = System.currentTimeMillis();
+                
+                // Query usage events for more accurate calculation
+                UsageEvents usageEvents = usageStatsManager.queryEvents(startTime, endTime);
+                UsageEvents.Event event = new UsageEvents.Event();
+                float nativeTotalTime = 0;
+                String lastPackage = null;
+                long lastEventTime = 0;
+                
+                while (usageEvents.hasNextEvent()) {
+                    usageEvents.getNextEvent(event);
+                    String packageName = event.getPackageName();
+                    
+                    // Skip our own app and system apps
+                    if (packageName.equals(getContext().getPackageName()) || isSystemApp(getContext(), packageName)) {
+                        continue;
+                    }
+                    
+                    if (event.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                        if (lastPackage != null && lastEventTime > 0) {
+                            // Calculate time spent in the last app
+                            long timeSpent = event.getTimeStamp() - lastEventTime;
+                            nativeTotalTime += timeSpent / (60f * 1000f);
+                        }
+                        lastPackage = packageName;
+                        lastEventTime = event.getTimeStamp();
+                    } else if (event.getEventType() == UsageEvents.Event.MOVE_TO_BACKGROUND) {
+                        if (lastPackage != null && lastEventTime > 0) {
+                            // Calculate time spent in the current app
+                            long timeSpent = event.getTimeStamp() - lastEventTime;
+                            nativeTotalTime += timeSpent / (60f * 1000f);
+                        }
+                        lastPackage = null;
+                        lastEventTime = 0;
+                    }
+                }
+                
+                // If there's still an active app, calculate its time up to now
+                if (lastPackage != null && lastEventTime > 0) {
+                    long timeSpent = endTime - lastEventTime;
+                    nativeTotalTime += timeSpent / (60f * 1000f);
+                }
+                
+                // Get the stored capacitor value
+                SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+                float capacitorTime = prefs.getFloat("capacitorScreenTime", 0);
+                long lastCapacitorUpdate = prefs.getLong("lastCapacitorUpdate", 0);
+                
+                // Use the higher value between native and capacitor, but only if capacitor value is recent (within 5 minutes)
+                float finalTotalTime = nativeTotalTime;
+                if (lastCapacitorUpdate > 0 && (System.currentTimeMillis() - lastCapacitorUpdate) < 5 * 60 * 1000) {
+                    finalTotalTime = Math.max(nativeTotalTime, capacitorTime);
+                }
+                
+                // Update shared preferences
+                SharedPreferences.Editor editor = prefs.edit();
+                editor.putFloat(KEY_TOTAL_SCREEN_TIME, finalTotalTime);
+                editor.putLong(KEY_LAST_UPDATE, System.currentTimeMillis());
+                editor.apply();
+                
+                // Broadcast the update
+                Intent broadcastIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
+                JSONObject updateData = new JSONObject();
+                updateData.put("totalScreenTime", finalTotalTime);
+                updateData.put("timestamp", System.currentTimeMillis());
+                broadcastIntent.putExtra("usageData", updateData.toString());
+                getContext().sendBroadcast(broadcastIntent);
+                
+                // Update widget
+                Intent updateIntent = new Intent(getContext(), ScreenTimeWidgetProvider.class);
+                updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
+                int[] ids = AppWidgetManager.getInstance(getContext())
+                    .getAppWidgetIds(new ComponentName(getContext(), ScreenTimeWidgetProvider.class));
+                updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+                getContext().sendBroadcast(updateIntent);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error updating app usage", e);
         }
     }
     

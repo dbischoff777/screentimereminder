@@ -86,6 +86,26 @@ public class BackgroundService extends Service {
             isRunning = true;
             usageStatsManager = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
             
+            // Set up the update runnable
+            updateRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Log.d(TAG, "Starting background update cycle");
+                        updateAppUsage();
+                        // Schedule next update
+                        mainHandler.postDelayed(this, UPDATE_INTERVAL);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error in background update cycle", e);
+                        // Retry after a shorter interval if there's an error
+                        mainHandler.postDelayed(this, 30000);
+                    }
+                }
+            };
+            
+            // Start the update runnable
+            mainHandler.post(updateRunnable);
+            
             // Set up the watchdog runnable
             watchdogRunnable = new Runnable() {
                 @Override
@@ -98,88 +118,21 @@ public class BackgroundService extends Service {
             
             // Start the watchdog
             mainHandler.post(watchdogRunnable);
-            Log.d(TAG, "Watchdog started");
             
-            // Set up the update runnable
-            updateRunnable = new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        Log.d(TAG, "Starting update cycle");
-                        updateAppUsage();
-                        // Schedule next update with a slight random delay
-                        long nextUpdate = UPDATE_INTERVAL + (long)(Math.random() * 10000);
-                        mainHandler.postDelayed(this, nextUpdate);
-                        Log.d(TAG, "Next update scheduled in " + (nextUpdate/1000) + " seconds");
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error in update runnable", e);
-                        // Retry after a shorter interval if there's an error
-                        mainHandler.postDelayed(this, 30000);
-                    }
-                }
-            };
-
-            // Start as foreground service immediately with a persistent notification
-            try {
-                Notification notification = createNotification();
-                if (notification != null) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                        startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-                    } else {
-                        startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, notification);
-                    }
-                    Log.d(TAG, "Started as foreground service");
-                }
-            } catch (SecurityException e) {
-                Log.e(TAG, "SecurityException when starting foreground service", e);
-                // Try to start without foreground service type
-                try {
-                    Notification notification = createNotification();
-                    if (notification != null) {
-                        startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, notification);
-                        Log.d(TAG, "Started as foreground service without type");
-                    }
-                } catch (Exception ex) {
-                    Log.e(TAG, "Failed to start foreground service", ex);
-                }
-            }
+            // Start as foreground service
+            startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, createNotification());
             
-            // Start the update runnable
-            if (updateRunnable != null) {
-                mainHandler.post(updateRunnable);
-                Log.d(TAG, "Started update runnable");
-            }
-
             // Acquire wake lock
-            try {
-                PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
-                if (powerManager != null) {
-                    wakeLock = powerManager.newWakeLock(
-                        PowerManager.PARTIAL_WAKE_LOCK | PowerManager.ON_AFTER_RELEASE,
-                        "ScreenTimeReminder::BackgroundTracking"
-                    );
-                    if (wakeLock != null) {
-                        wakeLock.setReferenceCounted(false);
-                        wakeLock.acquire(10 * 60 * 1000L); // 10 minutes
-                        Log.d(TAG, "WakeLock acquired successfully");
-                    }
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Error acquiring WakeLock", e);
-            }
-
-            // Request battery optimization exemption
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
-                if (powerManager != null && !powerManager.isIgnoringBatteryOptimizations(getPackageName())) {
-                    Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
-                    intent.setData(android.net.Uri.parse("package:" + getPackageName()));
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(intent);
-                }
+            PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (powerManager != null) {
+                wakeLock = powerManager.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK,
+                    "ScreenTimeReminder::BackgroundTracking"
+                );
+                wakeLock.acquire();
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error in onCreate", e);
+            Log.e(TAG, "Error in service onCreate", e);
         }
     }
 
@@ -287,19 +240,60 @@ public class BackgroundService extends Service {
 
     private void updateAppUsage() {
         try {
-            // Use the static method to ensure consistent calculation
-            int totalMinutes = AppUsageTracker.getTotalScreenTimeStatic(this);
-            float totalTime = totalMinutes;
+            // Get current usage stats
+            long startTime = getStartOfDay();
+            long endTime = System.currentTimeMillis();
+            
+            // Query usage events for more accurate calculation
+            UsageEvents usageEvents = usageStatsManager.queryEvents(startTime, endTime);
+            UsageEvents.Event event = new UsageEvents.Event();
+            float nativeTotalTime = 0;
+            String lastPackage = null;
+            long lastEventTime = 0;
+            
+            while (usageEvents.hasNextEvent()) {
+                usageEvents.getNextEvent(event);
+                String packageName = event.getPackageName();
+                
+                // Skip our own app and system apps
+                if (packageName.equals(getPackageName()) || isSystemApp(packageName)) {
+                    continue;
+                }
+                
+                if (event.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                    if (lastPackage != null && lastEventTime > 0) {
+                        // Calculate time spent in the last app
+                        long timeSpent = event.getTimeStamp() - lastEventTime;
+                        nativeTotalTime += timeSpent / (60f * 1000f);
+                    }
+                    lastPackage = packageName;
+                    lastEventTime = event.getTimeStamp();
+                } else if (event.getEventType() == UsageEvents.Event.MOVE_TO_BACKGROUND) {
+                    if (lastPackage != null && lastEventTime > 0) {
+                        // Calculate time spent in the current app
+                        long timeSpent = event.getTimeStamp() - lastEventTime;
+                        nativeTotalTime += timeSpent / (60f * 1000f);
+                    }
+                    lastPackage = null;
+                    lastEventTime = 0;
+                }
+            }
+            
+            // If there's still an active app, calculate its time up to now
+            if (lastPackage != null && lastEventTime > 0) {
+                long timeSpent = endTime - lastEventTime;
+                nativeTotalTime += timeSpent / (60f * 1000f);
+            }
             
             // Get the stored capacitor value
-            SharedPreferences prefs = getSharedPreferences(AppUsageTracker.PREFS_NAME, Context.MODE_PRIVATE);
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             float capacitorTime = prefs.getFloat("capacitorScreenTime", 0);
             long lastCapacitorUpdate = prefs.getLong("lastCapacitorUpdate", 0);
             
             // Use the higher value between native and capacitor, but only if capacitor value is recent (within 5 minutes)
-            float finalTotalTime = totalTime;
+            float finalTotalTime = nativeTotalTime;
             if (lastCapacitorUpdate > 0 && (System.currentTimeMillis() - lastCapacitorUpdate) < 5 * 60 * 1000) {
-                finalTotalTime = Math.max(totalTime, capacitorTime);
+                finalTotalTime = Math.max(nativeTotalTime, capacitorTime);
             }
             
             // Update shared preferences
@@ -324,9 +318,9 @@ public class BackgroundService extends Service {
             updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
             sendBroadcast(updateIntent);
             
-            Log.d(TAG, "Updated app usage: " + finalTotalTime + " minutes");
+            Log.d(TAG, "Background update completed. Total time: " + finalTotalTime + " minutes");
         } catch (Exception e) {
-            Log.e(TAG, "Error updating app usage", e);
+            Log.e(TAG, "Error in background update", e);
         }
     }
 
