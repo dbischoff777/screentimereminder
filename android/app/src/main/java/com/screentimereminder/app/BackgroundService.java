@@ -80,6 +80,8 @@ public class BackgroundService extends Service {
     private final ExecutorService backgroundExecutor = Executors.newSingleThreadExecutor();
     private final Object updateLock = new Object();
     private volatile boolean isUpdating = false;
+    private static long lastUpdateTimestamp = 0;
+    private static final long UPDATE_THRESHOLD = 500; // 500ms threshold
 
     private final BroadcastReceiver packageUpdateReceiver = new BroadcastReceiver() {
         @Override
@@ -445,102 +447,51 @@ public class BackgroundService extends Service {
 
     private void updateAppUsage() {
         try {
-            // Get current usage stats
-            long startTime = getStartOfDay();
-            long endTime = System.currentTimeMillis();
+            long currentTime = System.currentTimeMillis();
             
-            Log.d(TAG, "Calculating usage from " + new Date(startTime) + " to " + new Date(endTime));
-            
-            // Query usage events for more accurate calculation
-            UsageEvents usageEvents = usageStatsManager.queryEvents(startTime, endTime);
-            if (usageEvents == null) {
-                Log.e(TAG, "Failed to query usage events");
-                return;
-            }
+            // Use synchronized block to prevent concurrent updates
+            synchronized (updateLock) {
+                // Check if we've updated recently
+                if (currentTime - lastUpdateTimestamp < UPDATE_THRESHOLD) {
+                    Log.d(TAG, "Skipping update - too soon since last update");
+                    return;
+                }
+                
+                // Get current screen time using AppUsageTracker's method
+                float nativeTotalTime = AppUsageTracker.calculateScreenTime(this);
+                Log.d(TAG, "Total screen time calculated: " + nativeTotalTime + " minutes");
+                
+                // Update shared preferences with native calculation
+                SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+                SharedPreferences.Editor editor = prefs.edit();
+                editor.putFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, nativeTotalTime);
+                editor.putLong(AppUsageTracker.KEY_LAST_UPDATE, currentTime);
+                editor.apply();
 
-            UsageEvents.Event event = new UsageEvents.Event();
-            Map<String, Long> appUsageTimes = new HashMap<>();
-            Map<String, Long> lastForegroundTimes = new HashMap<>();
-            Set<String> foregroundApps = new HashSet<>();
-            
-            while (usageEvents.hasNextEvent()) {
-                usageEvents.getNextEvent(event);
-                String packageName = event.getPackageName();
+                // Let AppUsageTracker handle notifications
+                //AppUsageTracker.checkScreenTimeLimitStatic(this, Math.round(nativeTotalTime));
                 
-                // Skip our own app and system apps
-                if (packageName.equals(getPackageName()) || isSystemApp(packageName)) {
-                    continue;
-                }
+                // Broadcast the update
+                Intent broadcastIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
+                JSONObject updateData = new JSONObject();
+                updateData.put("totalScreenTime", nativeTotalTime);
+                updateData.put("timestamp", currentTime);
+                broadcastIntent.putExtra("usageData", updateData.toString());
+                sendBroadcast(broadcastIntent);
                 
-                long eventTime = event.getTimeStamp();
+                // Update widget
+                Intent updateIntent = new Intent(this, ScreenTimeWidgetProvider.class);
+                updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
+                int[] ids = AppWidgetManager.getInstance(this)
+                    .getAppWidgetIds(new ComponentName(this, ScreenTimeWidgetProvider.class));
+                updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+                sendBroadcast(updateIntent);
                 
-                if (event.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND) {
-                    // Record the start time for this app
-                    lastForegroundTimes.put(packageName, eventTime);
-                    foregroundApps.add(packageName);
-                    
-                } else if (event.getEventType() == UsageEvents.Event.MOVE_TO_BACKGROUND) {
-                    // Calculate time spent for this app
-                    Long appStartTime = lastForegroundTimes.remove(packageName);
-                    if (appStartTime != null) {
-                        long timeSpent = eventTime - appStartTime;
-                        if (timeSpent >= 1000 && timeSpent < 4 * 60 * 60 * 1000) {
-                            Long currentTotal = appUsageTimes.getOrDefault(packageName, 0L);
-                            appUsageTimes.put(packageName, currentTotal + timeSpent);
-                        }
-                    }
-                    foregroundApps.remove(packageName);
-                }
+                // Update timestamp after successful update
+                lastUpdateTimestamp = currentTime;
+                
+                Log.d(TAG, "Background update completed. Total time: " + nativeTotalTime + " minutes");
             }
-            
-            // Handle still-active apps
-            long finalTime = endTime;
-            for (String packageName : new HashSet<>(foregroundApps)) {
-                Long appStartTime = lastForegroundTimes.get(packageName);
-                if (appStartTime != null) {
-                    long timeSpent = finalTime - appStartTime;
-                    if (timeSpent >= 1000 && timeSpent < 4 * 60 * 60 * 1000) {
-                        Long currentTotal = appUsageTimes.getOrDefault(packageName, 0L);
-                        appUsageTimes.put(packageName, currentTotal + timeSpent);
-                        Log.d(TAG, String.format("Active app: %s, Time: %.2f minutes", 
-                            getAppName(packageName), timeSpent / (60f * 1000f)));
-                    }
-                }
-            }
-
-            // Calculate total minutes
-            float nativeTotalTime = 0;
-            for (Map.Entry<String, Long> entry : appUsageTimes.entrySet()) {
-                float minutes = entry.getValue() / (60f * 1000f);
-                nativeTotalTime += minutes;
-                Log.d(TAG, String.format("%s: %.2f minutes", getAppName(entry.getKey()), minutes));
-            }
-            Log.d(TAG, "Total screen time: " + nativeTotalTime + " minutes");
-            
-            // Update shared preferences with native calculation
-            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            SharedPreferences.Editor editor = prefs.edit();
-            editor.putFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, nativeTotalTime);
-            editor.putLong(AppUsageTracker.KEY_LAST_UPDATE, System.currentTimeMillis());
-            editor.apply();
-            
-            // Broadcast the update
-            Intent broadcastIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
-            JSONObject updateData = new JSONObject();
-            updateData.put("totalScreenTime", nativeTotalTime);
-            updateData.put("timestamp", System.currentTimeMillis());
-            broadcastIntent.putExtra("usageData", updateData.toString());
-            sendBroadcast(broadcastIntent);
-            
-            // Update widget
-            Intent updateIntent = new Intent(this, ScreenTimeWidgetProvider.class);
-            updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
-            int[] ids = AppWidgetManager.getInstance(this)
-                .getAppWidgetIds(new ComponentName(this, ScreenTimeWidgetProvider.class));
-            updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
-            sendBroadcast(updateIntent);
-            
-            Log.d(TAG, "Background update completed. Total time: " + nativeTotalTime + " minutes");
         } catch (Exception e) {
             Log.e(TAG, "Error in background update", e);
         }

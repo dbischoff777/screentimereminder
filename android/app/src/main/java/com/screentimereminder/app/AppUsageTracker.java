@@ -500,22 +500,12 @@ public class AppUsageTracker extends Plugin {
     @PluginMethod
     public void checkScreenTimeLimit(PluginCall call) {
         try {
-            JSObject data = call.getData();
-            float totalTime = 0;
-            if (data.has("totalTime")) {
-                totalTime = (float) data.getDouble("totalTime");
-                
-                // Store the Capacitor value with timestamp
-                SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-                SharedPreferences.Editor editor = prefs.edit();
-                editor.putFloat("capacitorScreenTime", totalTime);
-                editor.putLong("lastCapacitorUpdate", System.currentTimeMillis());
-                editor.apply();
-                
-                Log.d(TAG, "Updated Capacitor screen time: " + totalTime);
-            }
+            // Get current screen time using the same method as Statistics.tsx and widget
+            float totalTime = getTodayScreenTime(getContext());
             
-            int limit = data.getInteger("limit", 60);
+            // Get limit value from call data
+            JSObject data = call.getData();
+            int limit = data.has("limit") ? data.getInt("limit") : 60;
             
             // Save the limit to SharedPreferences
             SharedPreferences prefs = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
@@ -524,23 +514,7 @@ public class AppUsageTracker extends Plugin {
             editor.putBoolean("userHasSetLimit", true);
             editor.apply();
 
-            // Broadcast the update with the Capacitor value
-            Intent broadcastIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
-            JSONObject updateData = new JSONObject();
-            updateData.put("totalScreenTime", totalTime);
-            updateData.put("timestamp", System.currentTimeMillis());
-            broadcastIntent.putExtra("usageData", updateData.toString());
-            getContext().sendBroadcast(broadcastIntent);
-
-            // Update widget immediately
-            Intent updateIntent = new Intent(getContext(), ScreenTimeWidgetProvider.class);
-            updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
-            int[] ids = AppWidgetManager.getInstance(getContext())
-                .getAppWidgetIds(new ComponentName(getContext(), ScreenTimeWidgetProvider.class));
-            updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
-            getContext().sendBroadcast(updateIntent);
-
-            // Continue with notification checks
+            // Check for notifications
             long lastLimitReached = prefs.getLong("lastLimitReachedNotification", 0);
             long lastApproachingLimit = prefs.getLong("lastApproachingLimitNotification", 0);
             long currentTime = System.currentTimeMillis();
@@ -559,7 +533,7 @@ public class AppUsageTracker extends Plugin {
                         String.format("You have reached your daily limit of %d minutes.\nCurrent usage: %d minutes", 
                             limit, Math.round(totalTime)));
                     
-                    prefs.edit().putLong("lastLimitReachedNotification", currentTime).apply();
+                    editor.putLong("lastLimitReachedNotification", currentTime).apply();
                     Log.d(TAG, "Sent limit reached notification at " + percentOfLimit + "% of limit");
                 }
             } else if (percentOfLimit >= 90) {
@@ -569,15 +543,72 @@ public class AppUsageTracker extends Plugin {
                         String.format("You have %d minutes remaining.\nCurrent usage: %d minutes\nDaily limit: %d minutes", 
                             Math.round(limit - totalTime), Math.round(totalTime), limit));
                     
-                    prefs.edit().putLong("lastApproachingLimitNotification", currentTime).apply();
+                    editor.putLong("lastApproachingLimitNotification", currentTime).apply();
                     Log.d(TAG, "Sent approaching limit notification at " + percentOfLimit + "% of limit");
                 }
             }
-            
+
+            // Update widget
+            Intent updateIntent = new Intent(getContext(), ScreenTimeWidgetProvider.class);
+            updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
+            int[] ids = AppWidgetManager.getInstance(getContext())
+                .getAppWidgetIds(new ComponentName(getContext(), ScreenTimeWidgetProvider.class));
+            updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+            getContext().sendBroadcast(updateIntent);
+
             call.resolve();
         } catch (Exception e) {
             Log.e(TAG, "Error checking screen time limit", e);
-            call.reject("Failed to check screen time limit: " + e.getMessage(), e);
+            call.reject("Failed to check screen time limit: " + e.getMessage());
+        }
+    }
+
+    private float getTodayScreenTime(Context context) {
+        try {
+            // Get start of day
+            Calendar calendar = Calendar.getInstance();
+            calendar.set(Calendar.HOUR_OF_DAY, 0);
+            calendar.set(Calendar.MINUTE, 0);
+            calendar.set(Calendar.SECOND, 0);
+            calendar.set(Calendar.MILLISECOND, 0);
+            long startTime = calendar.getTimeInMillis();
+            long endTime = System.currentTimeMillis();
+
+            // Get app usage data
+            UsageStatsManager usageStatsManager = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
+            if (usageStatsManager == null) {
+                return 0;
+            }
+
+            List<UsageStats> stats = usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY, startTime, endTime
+            );
+
+            if (stats == null) {
+                return 0;
+            }
+
+            float totalMinutes = 0;
+            String ourPackage = context.getPackageName();
+
+            for (UsageStats stat : stats) {
+                String packageName = stat.getPackageName();
+                
+                // Skip our own app and system apps
+                if (packageName.equals(ourPackage) || isSystemApp(context, packageName)) {
+                    continue;
+                }
+
+                // Only count time if the app was used today
+                if (stat.getLastTimeUsed() >= startTime) {
+                    totalMinutes += stat.getTotalTimeInForeground() / (60f * 1000f);
+                }
+            }
+
+            return totalMinutes;
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting today's screen time", e);
+            return 0;
         }
     }
     
@@ -2028,6 +2059,34 @@ public class AppUsageTracker extends Plugin {
             Log.d(TAG, "Successfully saved notification frequency");
         } catch (Exception e) {
             Log.e(TAG, "Error setting notification frequency", e);
+        }
+    }
+
+    private static void showNotification(Context context, String title, String message) {
+        try {
+            NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                NotificationChannel channel = new NotificationChannel(
+                    "screen_time_channel",
+                    "Screen Time Notifications",
+                    NotificationManager.IMPORTANCE_DEFAULT
+                );
+                notificationManager.createNotificationChannel(channel);
+            }
+            
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(context, "screen_time_channel")
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(title)
+                .setContentText(message)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT);
+            
+            int notificationId = title.equals("Screen Time Limit Reached") ? 1 : 2;
+            notificationManager.notify(notificationId, builder.build());
+            Log.d(TAG, "Showing notification: " + title + " - " + message);
+        } catch (Exception e) {
+            Log.e(TAG, "Error showing notification", e);
         }
     }
 } 
