@@ -58,9 +58,9 @@ public class AppUsageTracker extends Plugin {
     public static final String KEY_SCREEN_TIME_LIMIT = "screenTimeLimit";
     public static final String KEY_TOTAL_SCREEN_TIME = "totalScreenTime";
     public static final String KEY_LAST_UPDATE = "lastUpdateTime";
-    private static final String KEY_LAST_LIMIT_NOTIFICATION = "lastLimitReachedNotification";
-    private static final String KEY_LAST_APPROACHING_NOTIFICATION = "lastApproachingLimitNotification";
-    private static final String KEY_NOTIFICATION_FREQUENCY = "notificationFrequency";
+    public static final String KEY_LAST_LIMIT_NOTIFICATION = "lastLimitReachedNotification";
+    public static final String KEY_LAST_APPROACHING_NOTIFICATION = "lastApproachingLimitNotification";
+    public static final String KEY_NOTIFICATION_FREQUENCY = "notificationFrequency";
     
     private static AppUsageTracker instance;
     private Context context;
@@ -1340,20 +1340,25 @@ public class AppUsageTracker extends Plugin {
             long lastApproachingLimit = prefs.getLong(KEY_LAST_APPROACHING_NOTIFICATION, 0);
             long currentTime = System.currentTimeMillis();
             
-            // Define cooldown period (60 seconds)
-            long NOTIFICATION_COOLDOWN = 60 * 1000;
+            // Get notification frequency from settings (in minutes)
+            long notificationFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L);
+            long NOTIFICATION_COOLDOWN = notificationFrequency * 60 * 1000;
             
             // Check if we need to show notifications
             if (percentOfLimit >= 100) {
                 // Check cooldown for limit reached notification
                 if (currentTime - lastLimitReached >= NOTIFICATION_COOLDOWN) {
-                    showLimitReachedNotification(totalMinutes);
+                    showNotification(getContext(), "Screen Time Limit Reached", 
+                        String.format("You have reached your daily limit of %d minutes.\nCurrent usage: %d minutes", 
+                            screenTimeLimit, totalMinutes));
                     prefs.edit().putLong(KEY_LAST_LIMIT_NOTIFICATION, currentTime).apply();
                 }
             } else if (percentOfLimit >= 90) {
                 // Check cooldown for approaching limit notification
                 if (currentTime - lastApproachingLimit >= NOTIFICATION_COOLDOWN) {
-                    showApproachingLimitNotification(totalMinutes);
+                    showNotification(getContext(), "Approaching Screen Time Limit", 
+                        String.format("You have %d minutes remaining.\nCurrent usage: %d minutes\nDaily limit: %d minutes", 
+                            Math.round(screenTimeLimit - totalMinutes), totalMinutes, screenTimeLimit));
                     prefs.edit().putLong(KEY_LAST_APPROACHING_NOTIFICATION, currentTime).apply();
                 }
             }
@@ -1985,26 +1990,56 @@ public class AppUsageTracker extends Plugin {
 
     private void showNotification(String title, String message) {
         try {
-            NotificationManager notificationManager = (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+            // Use the static method which includes cooldown check
+            showNotification(getContext(), title, message);
+        } catch (Exception e) {
+            Log.e(TAG, "Error showing notification", e);
+        }
+    }
+
+    private static void showNotification(Context context, String title, String message) {
+        try {
+            // Get notification frequency and last notification time
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            long notificationFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L);
+            long lastNotificationTime = prefs.getLong(KEY_LAST_LIMIT_NOTIFICATION, 0);
+            long currentTime = System.currentTimeMillis();
+            long NOTIFICATION_COOLDOWN = notificationFrequency * 60 * 1000;
             
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                NotificationChannel channel = new NotificationChannel(
-                    "screen_time_channel",
-                    "Screen Time Notifications",
-                    NotificationManager.IMPORTANCE_DEFAULT
-                );
-                notificationManager.createNotificationChannel(channel);
+            // Check if enough time has passed since the last notification
+            if (currentTime - lastNotificationTime >= NOTIFICATION_COOLDOWN) {
+                NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+                
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    NotificationChannel channel = new NotificationChannel(
+                        "screen_time_channel",
+                        "Screen Time Notifications",
+                        NotificationManager.IMPORTANCE_DEFAULT
+                    );
+                    notificationManager.createNotificationChannel(channel);
+                }
+                
+                NotificationCompat.Builder builder = new NotificationCompat.Builder(context, "screen_time_channel")
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle(title)
+                    .setContentText(message)
+                    .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                    .setAutoCancel(true);
+                
+                // Use a consistent notification ID (1) for both types of notifications
+                // This ensures that new notifications will replace old ones
+                notificationManager.notify(1, builder.build());
+                
+                // Update last notification time
+                prefs.edit().putLong(KEY_LAST_LIMIT_NOTIFICATION, currentTime).apply();
+                
+                Log.d(TAG, "Showing notification: " + title + " - " + message);
+            } else {
+                Log.d(TAG, "Skipping notification - " + 
+                    ((NOTIFICATION_COOLDOWN - (currentTime - lastNotificationTime)) / 60000) + 
+                    " minutes until next notification");
             }
-            
-            NotificationCompat.Builder builder = new NotificationCompat.Builder(getContext(), "screen_time_channel")
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle(title)
-                .setContentText(message)
-                .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT);
-            
-            notificationManager.notify(title.hashCode(), builder.build());
-            Log.d(TAG, "Showing notification: " + title + " - " + message);
         } catch (Exception e) {
             Log.e(TAG, "Error showing notification", e);
         }
@@ -2063,36 +2098,6 @@ public class AppUsageTracker extends Plugin {
         }
     }
 
-    private static void showNotification(Context context, String title, String message) {
-        try {
-            NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
-            
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                NotificationChannel channel = new NotificationChannel(
-                    "screen_time_channel",
-                    "Screen Time Notifications",
-                    NotificationManager.IMPORTANCE_DEFAULT
-                );
-                notificationManager.createNotificationChannel(channel);
-            }
-            
-            NotificationCompat.Builder builder = new NotificationCompat.Builder(context, "screen_time_channel")
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle(title)
-                .setContentText(message)
-                .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                .setAutoCancel(true);
-            
-            // Use a consistent notification ID (1) for both types of notifications
-            // This ensures that new notifications will replace old ones
-            notificationManager.notify(1, builder.build());
-            Log.d(TAG, "Showing notification: " + title + " - " + message);
-        } catch (Exception e) {
-            Log.e(TAG, "Error showing notification", e);
-        }
-    }
-
     /**
      * Static method to check screen time limit and show notifications
      */
@@ -2105,14 +2110,19 @@ public class AppUsageTracker extends Plugin {
             // Calculate percentage of limit
             float percentOfLimit = (totalMinutes / (float)screenTimeLimit) * 100;
             
-            // Get last notification times
+            // Get last notification times and notification frequency
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             long lastLimitReached = prefs.getLong(KEY_LAST_LIMIT_NOTIFICATION, 0);
             long lastApproachingLimit = prefs.getLong(KEY_LAST_APPROACHING_NOTIFICATION, 0);
             long currentTime = System.currentTimeMillis();
             
-            // Define cooldown period (60 seconds)
-            long NOTIFICATION_COOLDOWN = 60 * 1000;
+            // Get notification frequency from settings (in minutes)
+            long notificationFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L); // Default to 5 minutes if not set
+            // Convert to milliseconds for comparison
+            long NOTIFICATION_COOLDOWN = notificationFrequency * 60 * 1000;
+            
+            Log.d(TAG, "Notification frequency: " + notificationFrequency + " minutes");
+            Log.d(TAG, "Time since last limit notification: " + ((currentTime - lastLimitReached) / 60000) + " minutes");
             
             // Check if we need to show notifications
             if (percentOfLimit >= 100) {
@@ -2124,7 +2134,12 @@ public class AppUsageTracker extends Plugin {
                             String.format("You have reached your daily limit of %d minutes.\nCurrent usage: %d minutes", 
                                 screenTimeLimit, totalMinutes));
                         prefs.edit().putLong(KEY_LAST_LIMIT_NOTIFICATION, currentTime).apply();
+                        Log.d(TAG, "Showing limit reached notification after " + notificationFrequency + " minutes");
                     }
+                } else {
+                    Log.d(TAG, "Skipping limit reached notification - " + 
+                        ((NOTIFICATION_COOLDOWN - (currentTime - lastLimitReached)) / 60000) + 
+                        " minutes until next notification");
                 }
             } else if (percentOfLimit >= 90) {
                 // Check cooldown for approaching limit notification
@@ -2135,7 +2150,12 @@ public class AppUsageTracker extends Plugin {
                             String.format("You have %d minutes remaining.\nCurrent usage: %d minutes\nDaily limit: %d minutes", 
                                 Math.round(screenTimeLimit - totalMinutes), totalMinutes, screenTimeLimit));
                         prefs.edit().putLong(KEY_LAST_APPROACHING_NOTIFICATION, currentTime).apply();
+                        Log.d(TAG, "Showing approaching limit notification after " + notificationFrequency + " minutes");
                     }
+                } else {
+                    Log.d(TAG, "Skipping approaching limit notification - " + 
+                        ((NOTIFICATION_COOLDOWN - (currentTime - lastApproachingLimit)) / 60000) + 
+                        " minutes until next notification");
                 }
             }
         } catch (Exception e) {
