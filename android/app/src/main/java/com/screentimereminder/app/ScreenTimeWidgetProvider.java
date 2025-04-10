@@ -7,153 +7,226 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.app.usage.UsageStats;
+import android.app.usage.UsageStatsManager;
 import android.util.Log;
 import android.widget.RemoteViews;
+
 import org.json.JSONObject;
+
+import java.util.Calendar;
+import java.util.List;
+import java.util.Locale;
 
 public class ScreenTimeWidgetProvider extends AppWidgetProvider {
     private static final String TAG = "ScreenTimeWidget";
-    private static final String ACTION_REFRESH_WIDGET = "com.screentimereminder.app.REFRESH_WIDGET";
-    private static final long DEBOUNCE_DELAY = 500; // 500ms debounce
+    private static final String PREFS_NAME = "ScreenTimeReminder";
+    private static final String ACTION_UPDATE_WIDGET = "com.screentimereminder.app.UPDATE_WIDGET";
+    private static final long DEBOUNCE_TIME = 1000; // 1 second debounce
     private static long lastUpdateTime = 0;
-    private static float lastScreenTime = 0f;
-    private static long lastScreenTimeLimit = 0;
-
-    @Override
-    public void onReceive(Context context, Intent intent) {
-        super.onReceive(context, intent);
-        String action = intent.getAction();
-        Log.d(TAG, "Received action: " + action);
-
-        if (action != null) {
-            if (action.equals(ACTION_REFRESH_WIDGET) || 
-                action.equals("android.appwidget.action.APPWIDGET_UPDATE")) {
-                
-                // Check if enough time has passed since last update
-                long now = System.currentTimeMillis();
-                if (now - lastUpdateTime < DEBOUNCE_DELAY) {
-                    Log.d(TAG, "Skipping update due to debounce");
-                    return;
-                }
-                lastUpdateTime = now;
-
-                // Get AppWidget ids
-                AppWidgetManager appWidgetManager = AppWidgetManager.getInstance(context);
-                ComponentName thisWidget = new ComponentName(context, ScreenTimeWidgetProvider.class);
-                int[] appWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget);
-                
-                Log.d(TAG, "Refreshing widgets: " + appWidgetIds.length);
-                
-                // Update all widgets
-                onUpdate(context, appWidgetManager, appWidgetIds);
-            } else if (action.equals("com.screentimereminder.app.APP_USAGE_UPDATE")) {
-                try {
-                    // Check if this is a refresh trigger
-                    String usageData = intent.getStringExtra("usageData");
-                    if (usageData != null) {
-                        JSONObject data = new JSONObject(usageData);
-                        
-                        // Store the latest values
-                        if (data.has("totalScreenTime")) {
-                            lastScreenTime = (float) data.getDouble("totalScreenTime");
-                        }
-                        if (data.has("screenTimeLimit")) {
-                            lastScreenTimeLimit = data.getLong("screenTimeLimit");
-                        }
-
-                        if (data.has("action") && data.getString("action").equals("REFRESH_WIDGET")) {
-                            Log.d(TAG, "Received refresh trigger from WidgetService");
-                            // Trigger widget refresh
-                            AppWidgetManager appWidgetManager = AppWidgetManager.getInstance(context);
-                            ComponentName thisWidget = new ComponentName(context, ScreenTimeWidgetProvider.class);
-                            int[] appWidgetIds = appWidgetManager.getAppWidgetIds(thisWidget);
-                            onUpdate(context, appWidgetManager, appWidgetIds);
-                            return;
-                        }
-                    }
-                } catch (Exception e) {
-                    Log.e(TAG, "Error handling usage update", e);
-                }
-            }
-        }
-    }
 
     @Override
     public void onUpdate(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
-        // Update each widget
-        for (int appWidgetId : appWidgetIds) {
-            updateAppWidget(context, appWidgetManager, appWidgetId);
+        try {
+            // Get fresh data using the same method as Statistics.tsx
+            float currentScreenTime = getTodayScreenTime(context);
+            int screenTimeLimit = AppUsageTracker.getScreenTimeLimitStatic(context);
+            
+            Log.d(TAG, "Widget onUpdate called with values - Time: " + currentScreenTime + ", Limit: " + screenTimeLimit);
+
+            // Update all widgets
+            for (int appWidgetId : appWidgetIds) {
+                updateWidget(context, appWidgetManager, appWidgetId, currentScreenTime, screenTimeLimit);
+            }
+
+            // Start background service to ensure updates continue
+            startBackgroundService(context);
+        } catch (Exception e) {
+            Log.e(TAG, "Error in onUpdate", e);
         }
     }
 
-    private void updateAppWidget(Context context, AppWidgetManager appWidgetManager, int appWidgetId) {
-        RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_layout);
-
+    private float getTodayScreenTime(Context context) {
         try {
-            // Get SharedPreferences
-            SharedPreferences prefs = context.getSharedPreferences(AppUsageTracker.PREFS_NAME, Context.MODE_PRIVATE);
+            // Get start of day
+            Calendar calendar = Calendar.getInstance();
+            calendar.set(Calendar.HOUR_OF_DAY, 0);
+            calendar.set(Calendar.MINUTE, 0);
+            calendar.set(Calendar.SECOND, 0);
+            calendar.set(Calendar.MILLISECOND, 0);
+            long startTime = calendar.getTimeInMillis();
+            long endTime = System.currentTimeMillis();
+
+            // Get app usage data
+            UsageStatsManager usageStatsManager = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
+            if (usageStatsManager == null) {
+                return 0;
+            }
+
+            List<UsageStats> stats = usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY, startTime, endTime
+            );
+
+            if (stats == null) {
+                return 0;
+            }
+
+            float totalMinutes = 0;
+            String ourPackage = context.getPackageName();
+
+            for (UsageStats stat : stats) {
+                String packageName = stat.getPackageName();
+                
+                // Skip our own app and system apps
+                if (packageName.equals(ourPackage) || isSystemApp(context, packageName)) {
+                    continue;
+                }
+
+                // Only count time if the app was used today
+                if (stat.getLastTimeUsed() >= startTime) {
+                    totalMinutes += stat.getTotalTimeInForeground() / (60f * 1000f);
+                }
+            }
+
+            return totalMinutes;
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting today's screen time", e);
+            return 0;
+        }
+    }
+
+    private boolean isSystemApp(Context context, String packageName) {
+        try {
+            PackageManager packageManager = context.getPackageManager();
+            ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, 0);
+            return (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;
+        }
+    }
+
+    private void startBackgroundService(Context context) {
+        try {
+            Intent serviceIntent = new Intent(context, BackgroundService.class);
+            serviceIntent.setAction("START_TRACKING");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent);
+            } else {
+                context.startService(serviceIntent);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting background service", e);
+        }
+    }
+
+    private void updateWidget(Context context, AppWidgetManager appWidgetManager, int appWidgetId, float screenTime, int screenTimeLimit) {
+        try {
+            // Check debounce
+            long currentTime = System.currentTimeMillis();
+            if (currentTime - lastUpdateTime < DEBOUNCE_TIME) {
+                Log.d(TAG, "Skipping update due to debounce");
+                return;
+            }
+            lastUpdateTime = currentTime;
+
+            RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.screen_time_widget);
             
-            // Get the screen time value from Capacitor
-            float totalScreenTime = prefs.getFloat("capacitorScreenTime", 0f);
-            long lastCapacitorUpdate = prefs.getLong("lastCapacitorUpdate", 0);
+            // Format screen time
+            String timeText = formatTime(screenTime);
             
-            // Get the screen time limit
-            long screenTimeLimit = prefs.getLong(AppUsageTracker.KEY_SCREEN_TIME_LIMIT, AppUsageTracker.DEFAULT_SCREEN_TIME_LIMIT);
-            Log.d(TAG, "Using screen time limit: " + screenTimeLimit);
-
-            // Store the values for next comparison
-            lastScreenTime = totalScreenTime;
-            lastScreenTimeLimit = screenTimeLimit;
-
-            // Log the values for debugging
-            Log.d(TAG, String.format("Retrieved values - Total: %.2f minutes, Limit: %d minutes", 
-                totalScreenTime, screenTimeLimit));
-
-            // Format the time values
-            String usedTimeText = String.format("Used: %s", formatTime((int)Math.round(totalScreenTime)));
-            String limitText = String.format("%s", formatTime((int)screenTimeLimit));
-
-            // Calculate progress percentage (capped at 100%)
-            int progressPercent = Math.min((int)((totalScreenTime * 100.0f) / screenTimeLimit), 100);
-
-            // Update the TextViews
-            views.setTextViewText(R.id.screen_time_text, usedTimeText);
-            views.setTextViewText(R.id.limit_text, limitText);
+            // Calculate progress percentage (cap at 100%)
+            int progress = Math.min(100, Math.round((screenTime / screenTimeLimit) * 100));
             
-            // Update progress bar
-            views.setProgressBar(R.id.progress_bar, 100, progressPercent, false);
-
-            // Set up refresh button
+            // Update views
+            views.setTextViewText(R.id.widget_title, "Screen Time");
+            views.setTextViewText(R.id.widget_screen_time, timeText);
+            views.setProgressBar(R.id.widget_progress, 100, progress, false);
+            
+            // Set up refresh button click
             Intent refreshIntent = new Intent(context, ScreenTimeWidgetProvider.class);
-            refreshIntent.setAction(ACTION_REFRESH_WIDGET);
+            refreshIntent.setAction(ACTION_UPDATE_WIDGET);
+            refreshIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, new int[]{appWidgetId});
             PendingIntent refreshPendingIntent = PendingIntent.getBroadcast(
-                context, 
-                appWidgetId, 
-                refreshIntent, 
+                context, appWidgetId, refreshIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
             );
-            views.setOnClickPendingIntent(R.id.refresh_button, refreshPendingIntent);
-
-            Log.d(TAG, String.format("Updating widget %d - Time: %s, Limit: %s, Progress: %d%%, Raw values: %.2f/%d", 
-                appWidgetId, usedTimeText, limitText, progressPercent, totalScreenTime, screenTimeLimit));
-
-            // Update the widget
+            
+            // Update widget
             appWidgetManager.updateAppWidget(appWidgetId, views);
+            
+            Log.d(TAG, String.format("Widget updated with values - Time: %.2f, Limit: %d", screenTime, screenTimeLimit));
         } catch (Exception e) {
             Log.e(TAG, "Error updating widget", e);
         }
     }
 
-    private String formatTime(int minutes) {
-        if (minutes < 1) {
-            return "0m";
-        }
-        int hours = minutes / 60;
-        int mins = minutes % 60;
+    private String formatTime(float minutes) {
+        int hours = (int) (minutes / 60);
+        int mins = Math.round(minutes % 60);
+        
         if (hours > 0) {
-            return mins > 0 ? String.format("%dh %dm", hours, mins) : String.format("%dh", hours);
+            return String.format(Locale.getDefault(), "%dh %dm", hours, mins);
         } else {
-            return String.format("%dm", mins);
+            return String.format(Locale.getDefault(), "%dm", mins);
         }
     }
-} 
+
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        try {
+            String action = intent.getAction();
+            Log.d(TAG, "Received action: " + action);
+            
+            if (action == null) {
+                super.onReceive(context, intent);
+                return;
+            }
+
+            // Get widget manager and IDs
+            AppWidgetManager appWidgetManager = AppWidgetManager.getInstance(context);
+            ComponentName componentName = new ComponentName(context, ScreenTimeWidgetProvider.class);
+            int[] appWidgetIds = appWidgetManager.getAppWidgetIds(componentName);
+
+            // Handle different actions
+            switch (action) {
+                case ACTION_UPDATE_WIDGET:
+                case AppWidgetManager.ACTION_APPWIDGET_UPDATE:
+                    // Manual refresh or widget update
+                    onUpdate(context, appWidgetManager, appWidgetIds);
+                    break;
+
+                case "com.screentimereminder.app.APP_USAGE_UPDATE":
+                    // Handle usage update broadcast - always use native calculation
+                    onUpdate(context, appWidgetManager, appWidgetIds);
+                    break;
+
+                default:
+                    super.onReceive(context, intent);
+                    break;
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error in onReceive", e);
+            super.onReceive(context, intent);
+        }
+    }
+
+    @Override
+    public void onEnabled(Context context) {
+        super.onEnabled(context);
+        try {
+            // Start background service when widget is first added
+            startBackgroundService(context);
+        } catch (Exception e) {
+            Log.e(TAG, "Error in onEnabled", e);
+        }
+    }
+
+    @Override
+    public void onDisabled(Context context) {
+        super.onDisabled(context);
+        // No need to stop the service as other widgets or the app might still need it
+    }
+}

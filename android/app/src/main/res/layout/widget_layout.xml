@@ -12,7 +12,7 @@
         android:padding="8dp">
 
         <TextView
-            android:id="@+id/screen_time_text"
+            android:id="@+id/time_text"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Used: 0m"

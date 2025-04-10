@@ -48,17 +48,24 @@
             android:name=".BackgroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync"
+            android:process=":background"
+            android:stopWithTask="false">
+            <intent-filter>
+                <action android:name="com.screentimereminder.app.RESTART_SERVICE" />
+            </intent-filter>
+        </service>
 
         <!-- Boot receiver for starting our service on device boot -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="false"
+            android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
-                <action android:name="android.intent.action.REBOOT" />
+                <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </receiver>
 

@@ -12,6 +12,7 @@ import android.appwidget.AppWidgetManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -23,6 +24,7 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Log;
 
@@ -31,7 +33,9 @@ import androidx.core.app.NotificationCompat;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -39,6 +43,10 @@ import java.util.concurrent.ExecutorService;
 
 import org.json.JSONObject;
 import org.json.JSONArray;
+
+import android.app.AlarmManager;
+import android.content.BroadcastReceiver;
+import android.content.BroadcastReceiver;
 
 public class BackgroundService extends Service {
     private static final String TAG = "BackgroundService";
@@ -49,9 +57,13 @@ public class BackgroundService extends Service {
     private static final int NOTIFICATION_ID_BACKGROUND_SERVICE = 3;
     private static final long UPDATE_INTERVAL = 60000; // 1 minute
     private static final long WATCHDOG_INTERVAL = 10000; // 10 seconds
+    private static final String ACTION_RESTART_SERVICE = "com.screentimereminder.app.RESTART_SERVICE";
+    private static final int SERVICE_RESTART_ALARM_ID = 1001;
     private static boolean isRunning = false;
     private static ScheduledExecutorService scheduler;
     private static ScheduledExecutorService watchdogScheduler;
+    private AlarmManager alarmManager;
+    private PendingIntent restartIntent;
 
     private final IBinder binder = new LocalBinder();
     private Handler mainHandler;
@@ -69,6 +81,34 @@ public class BackgroundService extends Service {
     private final Object updateLock = new Object();
     private volatile boolean isUpdating = false;
 
+    private final BroadcastReceiver packageUpdateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            try {
+                String action = intent.getAction();
+                if (Intent.ACTION_PACKAGE_REPLACED.equals(action)) {
+                    String packageName = intent.getData().getSchemeSpecificPart();
+                    if (packageName.equals(getPackageName())) {
+                        Log.d(TAG, "Our app was updated, restarting service");
+                        restartService();
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error handling package update", e);
+            }
+        }
+    };
+
+    private final BroadcastReceiver restartReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (ACTION_RESTART_SERVICE.equals(intent.getAction())) {
+                Log.d(TAG, "Received restart broadcast");
+                startServiceInternal();
+            }
+        }
+    };
+
     public class LocalBinder extends Binder {
         BackgroundService getService() {
             return BackgroundService.this;
@@ -80,11 +120,38 @@ public class BackgroundService extends Service {
         super.onCreate();
         Log.d(TAG, "Service onCreate");
         try {
+            // Register restart receiver
+            IntentFilter filter = new IntentFilter(ACTION_RESTART_SERVICE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(restartReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(restartReceiver, filter);
+            }
+
+            // Set up alarm manager for service restart
+            alarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+            Intent intent = new Intent(this, BackgroundService.class);
+            intent.setAction(ACTION_RESTART_SERVICE);
+            restartIntent = PendingIntent.getService(
+                this, SERVICE_RESTART_ALARM_ID, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            );
+
             createNotificationChannel();
             mainHandler = new Handler(Looper.getMainLooper());
             startTime = System.currentTimeMillis();
             isRunning = true;
             usageStatsManager = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+            
+            // Register for package updates
+            IntentFilter filter2 = new IntentFilter();
+            filter2.addAction(Intent.ACTION_PACKAGE_REPLACED);
+            filter2.addDataScheme("package");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(packageUpdateReceiver, filter2, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(packageUpdateReceiver, filter2);
+            }
             
             // Set up the update runnable
             updateRunnable = new Runnable() {
@@ -94,11 +161,15 @@ public class BackgroundService extends Service {
                         Log.d(TAG, "Starting background update cycle");
                         updateAppUsage();
                         // Schedule next update
-                        mainHandler.postDelayed(this, UPDATE_INTERVAL);
+                        if (isRunning) {
+                            mainHandler.postDelayed(this, UPDATE_INTERVAL);
+                        }
                     } catch (Exception e) {
                         Log.e(TAG, "Error in background update cycle", e);
                         // Retry after a shorter interval if there's an error
-                        mainHandler.postDelayed(this, 30000);
+                        if (isRunning) {
+                            mainHandler.postDelayed(this, 30000);
+                        }
                     }
                 }
             };
@@ -106,23 +177,41 @@ public class BackgroundService extends Service {
             // Start the update runnable
             mainHandler.post(updateRunnable);
             
-            // Set up the watchdog runnable
+            // Set up the watchdog runnable with improved error handling
             watchdogRunnable = new Runnable() {
                 @Override
                 public void run() {
-                    Log.d(TAG, "Watchdog: Service is alive - " + new Date().toString());
-                    // Schedule next watchdog check
-                    mainHandler.postDelayed(this, WATCHDOG_INTERVAL);
+                    try {
+                        if (!isRunning) {
+                            Log.d(TAG, "Watchdog: Service not running, attempting restart");
+                            restartService();
+                            return;
+                        }
+                        
+                        Log.d(TAG, "Watchdog: Service is alive - " + new Date().toString());
+                        // Verify background updates are working
+                        verifyBackgroundUpdates();
+                        
+                        // Schedule next watchdog check if still running
+                        if (isRunning) {
+                            mainHandler.postDelayed(this, WATCHDOG_INTERVAL);
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error in watchdog", e);
+                        if (isRunning) {
+                            mainHandler.postDelayed(this, WATCHDOG_INTERVAL);
+                        }
+                    }
                 }
             };
             
             // Start the watchdog
             mainHandler.post(watchdogRunnable);
             
-            // Start as foreground service
-            startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, createNotification());
+            // Start as foreground service with high priority
+            startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, createHighPriorityNotification());
             
-            // Acquire wake lock
+            // Acquire partial wake lock
             PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
             if (powerManager != null) {
                 wakeLock = powerManager.newWakeLock(
@@ -131,8 +220,19 @@ public class BackgroundService extends Service {
                 );
                 wakeLock.acquire();
             }
+
+            // Schedule periodic updates
+            schedulePeriodicUpdates();
+
+            // Set up watchdog
+            setupWatchdog();
+
+            // Schedule periodic service check using AlarmManager as backup
+            scheduleServiceRestartAlarm();
+
         } catch (Exception e) {
             Log.e(TAG, "Error in service onCreate", e);
+            restartService();
         }
     }
 
@@ -182,7 +282,7 @@ public class BackgroundService extends Service {
             // Only create notification if we're not already a foreground service
             if (!isRunning) {
                 try {
-                    Notification notification = createNotification();
+                    Notification notification = createHighPriorityNotification();
                     if (notification != null) {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                             startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
@@ -196,7 +296,7 @@ public class BackgroundService extends Service {
                     Log.e(TAG, "SecurityException when starting foreground service", e);
                     // Try to start without foreground service type
                     try {
-                        Notification notification = createNotification();
+                        Notification notification = createHighPriorityNotification();
                         if (notification != null) {
                             startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, notification);
                             Log.d(TAG, "Started as foreground service without type in onStartCommand");
@@ -213,6 +313,87 @@ public class BackgroundService extends Service {
                 mainHandler.post(updateRunnable);
                 Log.d(TAG, "Started update runnable in onStartCommand");
             }
+
+            // Set up periodic screen time updates
+            if (scheduler == null || scheduler.isShutdown()) {
+                scheduler = Executors.newSingleThreadScheduledExecutor();
+                scheduler.scheduleAtFixedRate(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            // Get current usage stats
+                            long startTime = getStartOfDay();
+                            long endTime = System.currentTimeMillis();
+                            
+                            // Query usage events for more accurate calculation
+                            UsageEvents usageEvents = usageStatsManager.queryEvents(startTime, endTime);
+                            UsageEvents.Event event = new UsageEvents.Event();
+                            float nativeTotalTime = 0;
+                            String lastPackage = null;
+                            long lastEventTime = 0;
+                            
+                            while (usageEvents.hasNextEvent()) {
+                                usageEvents.getNextEvent(event);
+                                String packageName = event.getPackageName();
+                                
+                                // Skip our own app and system apps
+                                if (packageName.equals(getPackageName()) || isSystemApp(packageName)) {
+                                    continue;
+                                }
+                                
+                                if (event.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                                    if (lastPackage != null && lastEventTime > 0) {
+                                        long timeSpent = event.getTimeStamp() - lastEventTime;
+                                        nativeTotalTime += timeSpent / (60f * 1000f);
+                                    }
+                                    lastPackage = packageName;
+                                    lastEventTime = event.getTimeStamp();
+                                } else if (event.getEventType() == UsageEvents.Event.MOVE_TO_BACKGROUND) {
+                                    if (lastPackage != null && lastEventTime > 0) {
+                                        long timeSpent = event.getTimeStamp() - lastEventTime;
+                                        nativeTotalTime += timeSpent / (60f * 1000f);
+                                    }
+                                    lastPackage = null;
+                                    lastEventTime = 0;
+                                }
+                            }
+                            
+                            // If there's still an active app, calculate its time up to now
+                            if (lastPackage != null && lastEventTime > 0) {
+                                long timeSpent = endTime - lastEventTime;
+                                nativeTotalTime += timeSpent / (60f * 1000f);
+                            }
+
+                            // Update SharedPreferences with new value
+                            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+                            SharedPreferences.Editor editor = prefs.edit();
+                            editor.putFloat("capacitorScreenTime", nativeTotalTime);
+                            editor.putLong("lastCapacitorUpdate", System.currentTimeMillis());
+                            editor.apply();
+
+                            // Broadcast the update
+                            Intent broadcastIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
+                            JSONObject updateData = new JSONObject();
+                            updateData.put("totalScreenTime", nativeTotalTime);
+                            updateData.put("timestamp", System.currentTimeMillis());
+                            broadcastIntent.putExtra("usageData", updateData.toString());
+                            sendBroadcast(broadcastIntent);
+
+                            // Update widget
+                            Intent updateIntent = new Intent(getApplicationContext(), ScreenTimeWidgetProvider.class);
+                            updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
+                            int[] ids = AppWidgetManager.getInstance(getApplicationContext())
+                                .getAppWidgetIds(new ComponentName(getApplicationContext(), ScreenTimeWidgetProvider.class));
+                            updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+                            sendBroadcast(updateIntent);
+
+                            Log.d(TAG, "Periodic update completed. Total screen time: " + nativeTotalTime + " minutes");
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error in periodic update", e);
+                        }
+                    }
+                }, 0, 1, TimeUnit.MINUTES); // Update every minute
+            }
             
             return START_STICKY;
         } catch (Exception e) {
@@ -226,11 +407,35 @@ public class BackgroundService extends Service {
         Log.d(TAG, "Service onTaskRemoved");
         super.onTaskRemoved(rootIntent);
         
-        // Restart the service
+        // Schedule immediate restart
         Intent restartServiceIntent = new Intent(getApplicationContext(), this.getClass());
         restartServiceIntent.setPackage(getPackageName());
-        restartServiceIntent.setAction("RESTART_SERVICE");
+        restartServiceIntent.setAction(ACTION_RESTART_SERVICE);
         
+        PendingIntent restartServicePendingIntent = PendingIntent.getService(
+            getApplicationContext(), 1, restartServiceIntent,
+            PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE);
+            
+        AlarmManager alarmService = (AlarmManager) getApplicationContext()
+            .getSystemService(Context.ALARM_SERVICE);
+            
+        if (alarmService != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmService.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP,
+                    System.currentTimeMillis() + 1000,
+                    restartServicePendingIntent
+                );
+            } else {
+                alarmService.setExact(
+                    AlarmManager.RTC_WAKEUP,
+                    System.currentTimeMillis() + 1000,
+                    restartServicePendingIntent
+                );
+            }
+        }
+        
+        // Also try to restart immediately
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(restartServiceIntent);
         } else {
@@ -244,12 +449,19 @@ public class BackgroundService extends Service {
             long startTime = getStartOfDay();
             long endTime = System.currentTimeMillis();
             
+            Log.d(TAG, "Calculating usage from " + new Date(startTime) + " to " + new Date(endTime));
+            
             // Query usage events for more accurate calculation
             UsageEvents usageEvents = usageStatsManager.queryEvents(startTime, endTime);
+            if (usageEvents == null) {
+                Log.e(TAG, "Failed to query usage events");
+                return;
+            }
+
             UsageEvents.Event event = new UsageEvents.Event();
-            float nativeTotalTime = 0;
-            String lastPackage = null;
-            long lastEventTime = 0;
+            Map<String, Long> appUsageTimes = new HashMap<>();
+            Map<String, Long> lastForegroundTimes = new HashMap<>();
+            Set<String> foregroundApps = new HashSet<>();
             
             while (usageEvents.hasNextEvent()) {
                 usageEvents.getNextEvent(event);
@@ -260,52 +472,62 @@ public class BackgroundService extends Service {
                     continue;
                 }
                 
+                long eventTime = event.getTimeStamp();
+                
                 if (event.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND) {
-                    if (lastPackage != null && lastEventTime > 0) {
-                        // Calculate time spent in the last app
-                        long timeSpent = event.getTimeStamp() - lastEventTime;
-                        nativeTotalTime += timeSpent / (60f * 1000f);
-                    }
-                    lastPackage = packageName;
-                    lastEventTime = event.getTimeStamp();
+                    // Record the start time for this app
+                    lastForegroundTimes.put(packageName, eventTime);
+                    foregroundApps.add(packageName);
+                    
                 } else if (event.getEventType() == UsageEvents.Event.MOVE_TO_BACKGROUND) {
-                    if (lastPackage != null && lastEventTime > 0) {
-                        // Calculate time spent in the current app
-                        long timeSpent = event.getTimeStamp() - lastEventTime;
-                        nativeTotalTime += timeSpent / (60f * 1000f);
+                    // Calculate time spent for this app
+                    Long appStartTime = lastForegroundTimes.remove(packageName);
+                    if (appStartTime != null) {
+                        long timeSpent = eventTime - appStartTime;
+                        if (timeSpent >= 1000 && timeSpent < 4 * 60 * 60 * 1000) {
+                            Long currentTotal = appUsageTimes.getOrDefault(packageName, 0L);
+                            appUsageTimes.put(packageName, currentTotal + timeSpent);
+                        }
                     }
-                    lastPackage = null;
-                    lastEventTime = 0;
+                    foregroundApps.remove(packageName);
                 }
             }
             
-            // If there's still an active app, calculate its time up to now
-            if (lastPackage != null && lastEventTime > 0) {
-                long timeSpent = endTime - lastEventTime;
-                nativeTotalTime += timeSpent / (60f * 1000f);
+            // Handle still-active apps
+            long finalTime = endTime;
+            for (String packageName : new HashSet<>(foregroundApps)) {
+                Long appStartTime = lastForegroundTimes.get(packageName);
+                if (appStartTime != null) {
+                    long timeSpent = finalTime - appStartTime;
+                    if (timeSpent >= 1000 && timeSpent < 4 * 60 * 60 * 1000) {
+                        Long currentTotal = appUsageTimes.getOrDefault(packageName, 0L);
+                        appUsageTimes.put(packageName, currentTotal + timeSpent);
+                        Log.d(TAG, String.format("Active app: %s, Time: %.2f minutes", 
+                            getAppName(packageName), timeSpent / (60f * 1000f)));
+                    }
+                }
             }
+
+            // Calculate total minutes
+            float nativeTotalTime = 0;
+            for (Map.Entry<String, Long> entry : appUsageTimes.entrySet()) {
+                float minutes = entry.getValue() / (60f * 1000f);
+                nativeTotalTime += minutes;
+                Log.d(TAG, String.format("%s: %.2f minutes", getAppName(entry.getKey()), minutes));
+            }
+            Log.d(TAG, "Total screen time: " + nativeTotalTime + " minutes");
             
-            // Get the stored capacitor value
+            // Update shared preferences with native calculation
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            float capacitorTime = prefs.getFloat("capacitorScreenTime", 0);
-            long lastCapacitorUpdate = prefs.getLong("lastCapacitorUpdate", 0);
-            
-            // Use the higher value between native and capacitor, but only if capacitor value is recent (within 5 minutes)
-            float finalTotalTime = nativeTotalTime;
-            if (lastCapacitorUpdate > 0 && (System.currentTimeMillis() - lastCapacitorUpdate) < 5 * 60 * 1000) {
-                finalTotalTime = Math.max(nativeTotalTime, capacitorTime);
-            }
-            
-            // Update shared preferences
             SharedPreferences.Editor editor = prefs.edit();
-            editor.putFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, finalTotalTime);
+            editor.putFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, nativeTotalTime);
             editor.putLong(AppUsageTracker.KEY_LAST_UPDATE, System.currentTimeMillis());
             editor.apply();
             
             // Broadcast the update
             Intent broadcastIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
             JSONObject updateData = new JSONObject();
-            updateData.put("totalScreenTime", finalTotalTime);
+            updateData.put("totalScreenTime", nativeTotalTime);
             updateData.put("timestamp", System.currentTimeMillis());
             broadcastIntent.putExtra("usageData", updateData.toString());
             sendBroadcast(broadcastIntent);
@@ -318,7 +540,7 @@ public class BackgroundService extends Service {
             updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
             sendBroadcast(updateIntent);
             
-            Log.d(TAG, "Background update completed. Total time: " + finalTotalTime + " minutes");
+            Log.d(TAG, "Background update completed. Total time: " + nativeTotalTime + " minutes");
         } catch (Exception e) {
             Log.e(TAG, "Error in background update", e);
         }
@@ -369,44 +591,40 @@ public class BackgroundService extends Service {
 
     @Override
     public void onDestroy() {
-        super.onDestroy();
-        Log.d(TAG, "Service onDestroy");
         try {
+            Log.d(TAG, "Service onDestroy");
             isRunning = false;
             
-            // Remove the update runnable
-            if (updateRunnable != null) {
-                mainHandler.removeCallbacks(updateRunnable);
-                Log.d(TAG, "Removed update runnable");
+            // Unregister receivers
+            try {
+                unregisterReceiver(packageUpdateReceiver);
+                unregisterReceiver(restartReceiver);
+            } catch (Exception e) {
+                Log.e(TAG, "Error unregistering receivers", e);
             }
             
-            // Remove the watchdog runnable
-            if (watchdogRunnable != null) {
-                mainHandler.removeCallbacks(watchdogRunnable);
-                Log.d(TAG, "Removed watchdog runnable");
+            // Clean up executors
+            if (scheduler != null) {
+                scheduler.shutdownNow();
+            }
+            if (watchdogScheduler != null) {
+                watchdogScheduler.shutdownNow();
             }
             
-            // Shutdown executor
-            if (backgroundExecutor != null && !backgroundExecutor.isShutdown()) {
-                backgroundExecutor.shutdown();
-                try {
-                    if (!backgroundExecutor.awaitTermination(1, TimeUnit.SECONDS)) {
-                        backgroundExecutor.shutdownNow();
-                    }
-                } catch (InterruptedException e) {
-                    backgroundExecutor.shutdownNow();
-                }
-            }
-            
-            // Release wake lock safely
+            // Release wake lock
             if (wakeLock != null && wakeLock.isHeld()) {
                 try {
                     wakeLock.release();
-                    Log.d(TAG, "WakeLock released successfully");
                 } catch (Exception e) {
-                    Log.e(TAG, "Error releasing WakeLock", e);
+                    Log.e(TAG, "Error releasing wake lock", e);
                 }
             }
+            
+            super.onDestroy();
+            
+            // Schedule service restart
+            scheduleServiceRestartAlarm();
+            
         } catch (Exception e) {
             Log.e(TAG, "Error in onDestroy", e);
         }
@@ -488,23 +706,26 @@ public class BackgroundService extends Service {
         }
     }
 
-    private Notification createNotification() {
+    private Notification createHighPriorityNotification() {
         try {
-            // Create a persistent notification
             NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Screen Time Reminder")
-                .setContentText("Tracking screen time")
+                .setContentTitle("Screen Time Tracking Active")
+                .setContentText("Monitoring app usage")
                 .setSmallIcon(android.R.drawable.ic_menu_recent_history)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setPriority(NotificationCompat.PRIORITY_MAX)
                 .setOngoing(true)
-                .setAutoCancel(false)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setCategory(NotificationCompat.CATEGORY_SERVICE)
-                .setShowWhen(false)
-                .setOnlyAlertOnce(true)
-                .setDefaults(NotificationCompat.DEFAULT_ALL)
-                .setSound(null)
-                .setVibrate(null);
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
+
+            // Add action to restart service
+            Intent restartIntent = new Intent(this, BackgroundService.class);
+            restartIntent.setAction(ACTION_RESTART_SERVICE);
+            PendingIntent pendingIntent = PendingIntent.getService(
+                this, 0, restartIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            );
+            builder.addAction(android.R.drawable.ic_menu_rotate, "Restart Service", pendingIntent);
 
             return builder.build();
         } catch (Exception e) {
@@ -552,5 +773,131 @@ public class BackgroundService extends Service {
         // Implement the logic to get the base64 representation of the app icon
         // This is a placeholder and should be replaced with the actual implementation
         return "";
+    }
+
+    private void restartService() {
+        try {
+            Log.d(TAG, "Attempting to restart service");
+            
+            // Stop current service
+            stopForeground(true);
+            stopSelf();
+            
+            // Start new service instance
+            Intent restartIntent = new Intent(getApplicationContext(), BackgroundService.class);
+            restartIntent.setAction(ACTION_RESTART_SERVICE);
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(restartIntent);
+            } else {
+                startService(restartIntent);
+            }
+            
+            // Schedule backup alarm
+            scheduleServiceRestartAlarm();
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error restarting service", e);
+        }
+    }
+
+    private void verifyBackgroundUpdates() {
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            long lastUpdate = prefs.getLong("lastUpdateTime", 0);
+            long currentTime = System.currentTimeMillis();
+            
+            // If no updates for more than 2 minutes, restart updates
+            if (currentTime - lastUpdate > 2 * 60 * 1000) {
+                Log.w(TAG, "Background updates seem stalled, restarting");
+                if (updateRunnable != null) {
+                    mainHandler.removeCallbacks(updateRunnable);
+                    mainHandler.post(updateRunnable);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error verifying background updates", e);
+        }
+    }
+
+    private void schedulePeriodicUpdates() {
+        try {
+            if (scheduler == null || scheduler.isShutdown()) {
+                scheduler = Executors.newSingleThreadScheduledExecutor();
+                scheduler.scheduleAtFixedRate(() -> {
+                    try {
+                        updateAppUsage();
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error in periodic update", e);
+                    }
+                }, 0, 1, TimeUnit.MINUTES);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error scheduling periodic updates", e);
+        }
+    }
+
+    private void setupWatchdog() {
+        try {
+            if (watchdogScheduler == null || watchdogScheduler.isShutdown()) {
+                watchdogScheduler = Executors.newSingleThreadScheduledExecutor();
+                watchdogScheduler.scheduleAtFixedRate(() -> {
+                    try {
+                        if (!isRunning) {
+                            Log.d(TAG, "Watchdog: Service not running, restarting");
+                            restartService();
+                        } else {
+                            verifyBackgroundUpdates();
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error in watchdog", e);
+                    }
+                }, WATCHDOG_INTERVAL, WATCHDOG_INTERVAL, TimeUnit.MILLISECONDS);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error setting up watchdog", e);
+        }
+    }
+
+    private void scheduleServiceRestartAlarm() {
+        try {
+            // Schedule alarm to restart service every 15 minutes as backup
+            if (alarmManager != null) {
+                long interval = 15 * 60 * 1000; // 15 minutes
+                long triggerTime = System.currentTimeMillis() + interval;
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerTime,
+                        restartIntent
+                    );
+                } else {
+                    alarmManager.setExact(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerTime,
+                        restartIntent
+                    );
+                }
+                Log.d(TAG, "Scheduled service restart alarm");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error scheduling service restart alarm", e);
+        }
+    }
+
+    private void startServiceInternal() {
+        try {
+            Intent serviceIntent = new Intent(getApplicationContext(), BackgroundService.class);
+            serviceIntent.setAction(ACTION_RESTART_SERVICE);
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent);
+            } else {
+                startService(serviceIntent);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting service internally", e);
+        }
     }
 } 
