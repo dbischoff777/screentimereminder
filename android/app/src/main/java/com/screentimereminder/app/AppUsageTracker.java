@@ -49,6 +49,7 @@ import java.util.Set;
 import androidx.core.app.NotificationCompat;
 import android.appwidget.AppWidgetManager;
 import android.content.ComponentName;
+import android.app.Service;
 
 @CapacitorPlugin(name = "AppUsageTracker")
 public class AppUsageTracker extends Plugin {
@@ -2080,13 +2081,65 @@ public class AppUsageTracker extends Plugin {
                 .setContentTitle(title)
                 .setContentText(message)
                 .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT);
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setAutoCancel(true);
             
-            int notificationId = title.equals("Screen Time Limit Reached") ? 1 : 2;
-            notificationManager.notify(notificationId, builder.build());
+            // Use a consistent notification ID (1) for both types of notifications
+            // This ensures that new notifications will replace old ones
+            notificationManager.notify(1, builder.build());
             Log.d(TAG, "Showing notification: " + title + " - " + message);
         } catch (Exception e) {
             Log.e(TAG, "Error showing notification", e);
+        }
+    }
+
+    /**
+     * Static method to check screen time limit and show notifications
+     */
+    public static void checkScreenTimeLimitStatic(Context context, int totalMinutes) {
+        try {
+            // Get the current screen time limit
+            long screenTimeLimit = getScreenTimeLimitStatic(context);
+            Log.d(TAG, "Checking screen time limit - Total: " + totalMinutes + ", Limit: " + screenTimeLimit);
+
+            // Calculate percentage of limit
+            float percentOfLimit = (totalMinutes / (float)screenTimeLimit) * 100;
+            
+            // Get last notification times
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            long lastLimitReached = prefs.getLong(KEY_LAST_LIMIT_NOTIFICATION, 0);
+            long lastApproachingLimit = prefs.getLong(KEY_LAST_APPROACHING_NOTIFICATION, 0);
+            long currentTime = System.currentTimeMillis();
+            
+            // Define cooldown period (60 seconds)
+            long NOTIFICATION_COOLDOWN = 60 * 1000;
+            
+            // Check if we need to show notifications
+            if (percentOfLimit >= 100) {
+                // Check cooldown for limit reached notification
+                if (currentTime - lastLimitReached >= NOTIFICATION_COOLDOWN) {
+                    // Only show notification if called from background service
+                    if (context instanceof Service) {
+                        showNotification(context, "Screen Time Limit Reached", 
+                            String.format("You have reached your daily limit of %d minutes.\nCurrent usage: %d minutes", 
+                                screenTimeLimit, totalMinutes));
+                        prefs.edit().putLong(KEY_LAST_LIMIT_NOTIFICATION, currentTime).apply();
+                    }
+                }
+            } else if (percentOfLimit >= 90) {
+                // Check cooldown for approaching limit notification
+                if (currentTime - lastApproachingLimit >= NOTIFICATION_COOLDOWN) {
+                    // Only show notification if called from background service
+                    if (context instanceof Service) {
+                        showNotification(context, "Approaching Screen Time Limit", 
+                            String.format("You have %d minutes remaining.\nCurrent usage: %d minutes\nDaily limit: %d minutes", 
+                                Math.round(screenTimeLimit - totalMinutes), totalMinutes, screenTimeLimit));
+                        prefs.edit().putLong(KEY_LAST_APPROACHING_NOTIFICATION, currentTime).apply();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking screen time limit", e);
         }
     }
 } 

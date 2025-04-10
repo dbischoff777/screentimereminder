@@ -34,6 +34,7 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
@@ -457,24 +458,47 @@ public class BackgroundService extends Service {
                     return;
                 }
                 
-                // Get current screen time using AppUsageTracker's method
-                float nativeTotalTime = AppUsageTracker.calculateScreenTime(this);
-                Log.d(TAG, "Total screen time calculated: " + nativeTotalTime + " minutes");
+                // Get current screen time using the same method as the widget
+                float totalScreenTime = getTodayScreenTime(this);
+                Log.d(TAG, "Total screen time calculated: " + totalScreenTime + " minutes");
                 
                 // Update shared preferences with native calculation
                 SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
                 SharedPreferences.Editor editor = prefs.edit();
-                editor.putFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, nativeTotalTime);
+                editor.putFloat(AppUsageTracker.KEY_TOTAL_SCREEN_TIME, totalScreenTime);
                 editor.putLong(AppUsageTracker.KEY_LAST_UPDATE, currentTime);
                 editor.apply();
 
-                // Let AppUsageTracker handle notifications
-                //AppUsageTracker.checkScreenTimeLimitStatic(this, Math.round(nativeTotalTime));
+                // Check if our app is in the foreground
+                boolean isAppInForeground = false;
+                UsageStatsManager usageStatsManager = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+                if (usageStatsManager != null) {
+                    long endTime = System.currentTimeMillis();
+                    long startTime = endTime - 1000; // Check last second
+                    UsageEvents usageEvents = usageStatsManager.queryEvents(startTime, endTime);
+                    UsageEvents.Event event = new UsageEvents.Event();
+                    while (usageEvents.hasNextEvent()) {
+                        usageEvents.getNextEvent(event);
+                        if (event.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND && 
+                            event.getPackageName().equals(getPackageName())) {
+                            isAppInForeground = true;
+                            break;
+                        }
+                    }
+                }
+
+                // Only check screen time limit if app is in background
+                if (!isAppInForeground) {
+                    Log.d(TAG, "App is in background, checking screen time limit");
+                    AppUsageTracker.checkScreenTimeLimitStatic(this, Math.round(totalScreenTime));
+                } else {
+                    Log.d(TAG, "App is in foreground, skipping screen time limit check");
+                }
                 
                 // Broadcast the update
                 Intent broadcastIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
                 JSONObject updateData = new JSONObject();
-                updateData.put("totalScreenTime", nativeTotalTime);
+                updateData.put("totalScreenTime", totalScreenTime);
                 updateData.put("timestamp", currentTime);
                 broadcastIntent.putExtra("usageData", updateData.toString());
                 sendBroadcast(broadcastIntent);
@@ -490,10 +514,59 @@ public class BackgroundService extends Service {
                 // Update timestamp after successful update
                 lastUpdateTimestamp = currentTime;
                 
-                Log.d(TAG, "Background update completed. Total time: " + nativeTotalTime + " minutes");
+                Log.d(TAG, "Background update completed. Total time: " + totalScreenTime + " minutes");
             }
         } catch (Exception e) {
             Log.e(TAG, "Error in background update", e);
+        }
+    }
+
+    private float getTodayScreenTime(Context context) {
+        try {
+            // Get start of day
+            Calendar calendar = Calendar.getInstance();
+            calendar.set(Calendar.HOUR_OF_DAY, 0);
+            calendar.set(Calendar.MINUTE, 0);
+            calendar.set(Calendar.SECOND, 0);
+            calendar.set(Calendar.MILLISECOND, 0);
+            long startTime = calendar.getTimeInMillis();
+            long endTime = System.currentTimeMillis();
+
+            // Get app usage data
+            UsageStatsManager usageStatsManager = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
+            if (usageStatsManager == null) {
+                return 0;
+            }
+
+            List<UsageStats> stats = usageStatsManager.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY, startTime, endTime
+            );
+
+            if (stats == null) {
+                return 0;
+            }
+
+            float totalMinutes = 0;
+            String ourPackage = context.getPackageName();
+
+            for (UsageStats stat : stats) {
+                String packageName = stat.getPackageName();
+                
+                // Skip our own app and system apps
+                if (packageName.equals(ourPackage) || isSystemApp(packageName)) {
+                    continue;
+                }
+
+                // Only count time if the app was used today
+                if (stat.getLastTimeUsed() >= startTime) {
+                    totalMinutes += stat.getTotalTimeInForeground() / (60f * 1000f);
+                }
+            }
+
+            return totalMinutes;
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting today's screen time", e);
+            return 0;
         }
     }
 
@@ -633,27 +706,21 @@ public class BackgroundService extends Service {
     }
 
     private void createNotificationChannel() {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                NotificationChannel channel = new NotificationChannel(
-                    CHANNEL_ID,
-                    "Screen Time Reminder",
-                    NotificationManager.IMPORTANCE_HIGH
-                );
-                channel.setDescription("Background service for screen time tracking");
-                channel.enableLights(true);
-                channel.enableVibration(true);
-                channel.setShowBadge(true);
-                channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-                
-                NotificationManager notificationManager = getSystemService(NotificationManager.class);
-                if (notificationManager != null) {
-                    notificationManager.createNotificationChannel(channel);
-                    Log.d(TAG, "Notification channel created successfully");
-                }
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error creating notification channel", e);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                CHANNEL_ID,
+                "Screen Time Tracking",
+                NotificationManager.IMPORTANCE_HIGH
+            );
+            channel.setDescription("Tracks screen time and shows notifications");
+            channel.enableLights(true);
+            channel.setLightColor(Color.RED);
+            channel.enableVibration(true);
+            channel.setVibrationPattern(new long[]{0, 1000, 500, 1000});
+            channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+            
+            NotificationManager notificationManager = getSystemService(NotificationManager.class);
+            notificationManager.createNotificationChannel(channel);
         }
     }
 
