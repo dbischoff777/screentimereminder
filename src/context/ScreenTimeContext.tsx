@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import AppUsageTrackerService, { AppUsage as TrackerAppUsage } from '../services/AppUsageTracker';
 import BackgroundUpdateService from '../services/BackgroundUpdateService';
 
@@ -24,11 +24,11 @@ interface AppUsage {
 
 interface ScreenTimeContextType {
   screenTimeLimit: number;
-  setScreenTimeLimit: (limit: number) => void;
+  setScreenTimeLimit: (limit: number | { limitMinutes: number }) => void;
   notificationsEnabled: boolean;
   setNotificationsEnabled: (enabled: boolean) => void;
   notificationFrequency: number;
-  setNotificationFrequency: (frequency: number) => void;
+  setNotificationFrequency: (params: number | { frequency: number }) => void;
   // Usage access permission
   usageAccessEnabled: boolean;
   setUsageAccessEnabled: (enabled: boolean) => void;
@@ -64,7 +64,7 @@ const getCategoryColor = (category: string): string => {
 
 export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Screen time limit in minutes
-  const [screenTimeLimit, setScreenTimeLimit] = useState<number>(() => {
+  const [screenTimeLimitState, setScreenTimeLimitState] = useState<number>(() => {
     const saved = localStorage.getItem('screenTimeLimit');
     const parsed = saved ? parseInt(saved, 10) : 120; // Default 2 hours
     console.log('Initializing screen time limit from localStorage:', saved, 'parsed:', parsed);
@@ -104,8 +104,8 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
       const appUsageTracker = AppUsageTrackerService.getInstance();
       await appUsageTracker.checkScreenTimeLimit({
         totalTime: getTotalScreenTime(),
-        limit: screenTimeLimit,
-        notificationFrequency: notificationFrequency
+        limit: screenTimeLimitState,
+        notificationFrequency
       });
     } catch (error) {
       console.error('Error checking screen time limit:', error);
@@ -118,9 +118,9 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
       try {
         const appUsageTracker = AppUsageTrackerService.getInstance();
         const limit = await appUsageTracker.getScreenTimeLimit();
-        if (limit !== screenTimeLimit) {
+        if (limit !== screenTimeLimitState) {
           console.log('ScreenTimeContext: Initializing screen time limit from native storage:', limit);
-          setScreenTimeLimit(limit);
+          setScreenTimeLimitState(limit);
         }
       } catch (error) {
         console.error('Error initializing screen time limit:', error);
@@ -132,19 +132,12 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
 
   // Save settings to localStorage whenever they change
   useEffect(() => {
-    console.log('Screen time limit changed in context:', screenTimeLimit);
-    localStorage.setItem('screenTimeLimit', screenTimeLimit.toString());
-    
-    // Sync with native code
-    const appUsageTracker = AppUsageTrackerService.getInstance();
-    appUsageTracker.setScreenTimeLimit(screenTimeLimit)
-      .catch(error => {
-        console.error('Error syncing screen time limit with native code:', error);
-      });
+    console.log('Screen time limit changed in context:', screenTimeLimitState);
+    localStorage.setItem('screenTimeLimit', screenTimeLimitState.toString());
     
     // Force a screen time check with the new limit
     checkLimit();
-  }, [screenTimeLimit]);
+  }, [screenTimeLimitState]);
 
   useEffect(() => {
     localStorage.setItem('notificationsEnabled', notificationsEnabled.toString());
@@ -170,16 +163,32 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
   useEffect(() => {
     console.log('ScreenTimeContext: Notification frequency changed:', notificationFrequency);
     localStorage.setItem('notificationFrequency', notificationFrequency.toString());
+  }, [notificationFrequency]);
+
+  const setNotificationFrequencyWithSync = useCallback((params: number | { frequency: number }) => {
+    // Extract frequency value from either parameter type
+    const frequency = typeof params === 'number' ? params : params.frequency;
     
-    // Sync with native code
-    const appUsageTracker = AppUsageTrackerService.getInstance();
-    appUsageTracker.setNotificationFrequency(notificationFrequency)
-      .then(() => {
-        console.log('ScreenTimeContext: Successfully synced notification frequency with native code');
-      })
-      .catch(error => {
-        console.error('Error syncing notification frequency with native code:', error);
-      });
+    // Only update if the frequency is actually different
+    if (frequency !== notificationFrequency) {
+      console.log('ScreenTimeContext: Setting notification frequency from:', notificationFrequency, 'to:', frequency);
+      setNotificationFrequency(frequency);
+      
+      // Sync with native code
+      const appUsageTracker = AppUsageTrackerService.getInstance();
+      appUsageTracker.setNotificationFrequency({ frequency })
+        .then(() => {
+          console.log('ScreenTimeContext: Successfully synced notification frequency with native code:', frequency);
+        })
+        .catch(error => {
+          console.error('Error syncing notification frequency with native code:', error);
+          // Revert to previous value on error
+          console.log('ScreenTimeContext: Reverting notification frequency to:', notificationFrequency);
+          setNotificationFrequency(notificationFrequency);
+        });
+    } else {
+      console.log('ScreenTimeContext: Ignoring notification frequency update - value unchanged:', frequency);
+    }
   }, [notificationFrequency]);
 
   useEffect(() => {
@@ -588,7 +597,7 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
         // Check screen time limit with the accurate total
         await appUsageTracker.checkScreenTimeLimit({
           totalTime,
-          limit: screenTimeLimit,
+          limit: screenTimeLimitState,
           notificationFrequency
         });
         
@@ -670,15 +679,27 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     };
   }, []);
 
+  const setScreenTimeLimit = useCallback((limit: number | { limitMinutes: number }) => {
+    const limitMinutes = typeof limit === 'number' ? limit : limit.limitMinutes;
+    setScreenTimeLimitState(limitMinutes);
+    
+    // Sync with native code
+    const appUsageTracker = AppUsageTrackerService.getInstance();
+    appUsageTracker.setScreenTimeLimit(limitMinutes)
+      .catch(error => {
+        console.error('Error syncing screen time limit with native code:', error);
+      });
+  }, []);
+
   return (
     <ScreenTimeContext.Provider
       value={{
-        screenTimeLimit,
+        screenTimeLimit: screenTimeLimitState,
         setScreenTimeLimit,
         notificationsEnabled,
         setNotificationsEnabled,
         notificationFrequency,
-        setNotificationFrequency,
+        setNotificationFrequency: setNotificationFrequencyWithSync,
         usageAccessEnabled,
         setUsageAccessEnabled,
         appUsageData,

@@ -207,8 +207,12 @@ const Settings = () => {
             { value: '420', label: '7h' },
             { value: '480', label: '8h' }
           ]}
-          value={screenTimeLimit}
-          onChange={setScreenTimeLimit}
+          value={screenTimeLimit.toString()}
+          onChange={(value) => {
+            const limitMinutes = typeof value === 'string' ? parseInt(value, 10) : value;
+            console.log('Setting screen time limit to:', limitMinutes);
+            setScreenTimeLimit({ limitMinutes });
+          }}
           label="Daily Screen Time Limit"
         />
 
@@ -338,8 +342,16 @@ const Settings = () => {
               { value: '30', label: '30m' },
               { value: '60', label: '60m' }
             ]}
-            value={notificationFrequency}
-            onChange={setNotificationFrequency}
+            value={notificationFrequency.toString()}
+            onChange={(value) => {
+              const frequency = parseInt(value.toString(), 10);
+              if (frequency !== notificationFrequency) {
+                console.log('Settings: Setting notification frequency to:', frequency);
+                setNotificationFrequency({ frequency });
+              } else {
+                console.log('Settings: Notification frequency unchanged:', frequency);
+              }
+            }}
             label="Notification Frequency"
           />
         )}

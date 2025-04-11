@@ -3,8 +3,8 @@ import { useState, useEffect, useRef } from 'react';
 
 interface CustomDropdownProps {
   options: { value: string; label: string }[];
-  value: number;
-  onChange: (value: number) => void;
+  value: string | number;
+  onChange: (value: string | number) => void;
   label: string;
 }
 
@@ -15,7 +15,13 @@ const CustomDropdown = ({
   label
 }: CustomDropdownProps) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [currentValue, setCurrentValue] = useState(value.toString());
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Update internal value when prop changes
+  useEffect(() => {
+    setCurrentValue(value.toString());
+  }, [value]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -28,6 +34,21 @@ const CustomDropdown = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Find the selected option's label
+  const selectedOption = options.find(opt => opt.value === currentValue);
+
+  const handleOptionSelect = (optionValue: string) => {
+    console.log('CustomDropdown: Selected value:', optionValue, 'Current value:', currentValue);
+    if (optionValue !== currentValue) {
+      console.log('CustomDropdown: Value changed, updating to:', optionValue);
+      setCurrentValue(optionValue);
+      onChange(optionValue);
+    } else {
+      console.log('CustomDropdown: Value unchanged:', optionValue);
+    }
+    setIsOpen(false);
+  };
 
   return (
     <div ref={dropdownRef} style={{ position: 'relative', width: '100%' }}>
@@ -46,7 +67,7 @@ const CustomDropdown = ({
           }
         }}
       >
-        {value} minutes
+        {selectedOption ? selectedOption.label : `${currentValue} minutes`}
       </Button>
 
       {isOpen && (
@@ -70,18 +91,15 @@ const CustomDropdown = ({
             {options.map((option) => (
               <Button
                 key={option.value}
-                variant={value === parseInt(option.value) ? "filled" : "outline"}
-                onClick={() => {
-                  onChange(parseInt(option.value));
-                  setIsOpen(false);
-                }}
+                variant={currentValue === option.value ? "filled" : "outline"}
+                onClick={() => handleOptionSelect(option.value)}
                 style={{
                   flex: 1,
-                  backgroundColor: value === parseInt(option.value) 
+                  backgroundColor: currentValue === option.value 
                     ? '#FF00FF' 
                     : 'transparent',
                   borderColor: '#FF00FF',
-                  color: value === parseInt(option.value) 
+                  color: currentValue === option.value 
                     ? '#000020' 
                     : '#00FFFF',
                   fontWeight: 'bold',

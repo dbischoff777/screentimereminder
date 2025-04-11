@@ -42,7 +42,7 @@ export interface AppUsageTrackerPlugin {
     notificationFrequency: number;
     totalScreenTime: number;
   }>;
-  setScreenTimeLimit(params: { limit: number }): Promise<void>;
+  setScreenTimeLimit(params: { limitMinutes: number }): Promise<void>;
   setNotificationFrequency(params: { frequency: number }): Promise<void>;
   getScreenTimeLimit(): Promise<{ value: number }>;
 }
@@ -432,7 +432,7 @@ export default class AppUsageTrackerService {
   public async setScreenTimeLimit(limit: number): Promise<void> {
     try {
       console.log('Setting screen time limit in native:', limit);
-      await this.plugin.setScreenTimeLimit({ limit });
+      await this.plugin.setScreenTimeLimit({ limitMinutes: limit });
     } catch (error) {
       console.error('Error setting screen time limit:', error);
       throw error;
@@ -442,10 +442,10 @@ export default class AppUsageTrackerService {
   /**
    * Set notification frequency
    */
-  public async setNotificationFrequency(frequency: number): Promise<void> {
+  public async setNotificationFrequency(params: { frequency: number }): Promise<void> {
     try {
-      console.log('AppUsageTracker: Setting notification frequency to:', frequency);
-      await this.plugin.setNotificationFrequency({ frequency });
+      console.log('AppUsageTracker: Setting notification frequency to:', params.frequency);
+      await this.plugin.setNotificationFrequency(params);
       console.log('AppUsageTracker: Notification frequency set successfully');
     } catch (error) {
       console.error('Error setting notification frequency:', error);
