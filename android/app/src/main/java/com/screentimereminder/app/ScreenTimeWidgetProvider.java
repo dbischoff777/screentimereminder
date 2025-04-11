@@ -161,8 +161,8 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
             Log.d(TAG, "Updating views with values - Time: " + timeText + ", Limit: " + limitText + ", Progress: " + progress);
             
             // Update views with detailed logging
-            Log.d(TAG, "Setting time_text to: " + "Used: " + timeText);
-            views.setTextViewText(R.id.time_text, "Used: " + timeText);
+            Log.d(TAG, "Setting time_text to: " + "Screen Time: " + timeText);
+            views.setTextViewText(R.id.time_text, "Screen Time: " + timeText);
             
             Log.d(TAG, "Setting progress_bar to: " + progress);
             views.setProgressBar(R.id.progress_bar, 100, progress, false);

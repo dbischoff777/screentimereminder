@@ -129,11 +129,11 @@ const Statistics = () => {
         // Show apps that either:
         // 1. Contribute to the first 95% of usage OR
         // 2. Have at least 1% usage time
-        return accumulatedPercentage <= 95 || percentage >= 1;
+        return accumulatedPercentage <= 95 || percentage >= 4;
       });
     }
     
-    return allApps;  // Show all apps if we have 15 or fewer
+    return allApps;  // Show all apps if we have 6 or fewer
   };
 
   const sortedApps = getFilteredApps();

@@ -5,12 +5,14 @@ import FocusTimer from '../components/FocusTimer';
 import { EmailReportSettings, EmailSettings } from '../components/EmailReportSettings';
 import { ReportScheduler } from '../services/reportScheduler';
 import { notifications } from '@mantine/notifications';
+import { AppUsage } from '../services/AppUsageTracker';
 
 const DetailedAnalytics = () => {
   const { 
     appUsageData, 
     getTotalScreenTime, 
-    screenTimeLimit
+    screenTimeLimit,
+    getAppUsageData
   } = useScreenTime();
   const [totalScreenTime, setTotalScreenTime] = useState(0);
   const [activeTab, setActiveTab] = useState<string | null>('heatmap');
@@ -29,24 +31,91 @@ const DetailedAnalytics = () => {
   }, [appUsageData, getTotalScreenTime]);
 
   // Filter and sort current day's data
-  const getCurrentDayData = () => {
+  const getCurrentDayData = async () => {
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-    return [...appUsageData]
-      .filter(app => {
-        const appTime = app.lastUsed ? new Date(app.lastUsed) : null;
-        return appTime && appTime >= startOfDay && appTime <= endOfDay;
-      })
+    // Get all usage events for today
+    const usageData = await getAppUsageData(startOfDay.getTime(), endOfDay.getTime());
+    
+    // Group usage events by app and calculate total time for each
+    const appUsageMap = new Map<string, {
+      name: string;
+      time: number;
+      lastUsed?: Date;
+      category: string;
+      color: string;
+      icon?: string;
+      usageInstances: Array<{ startTime: Date; endTime: Date; duration: number }>;
+    }>();
+
+    usageData.forEach((app: AppUsage) => {
+      if (!app.lastUsed) return;
+      
+      const usageTime = new Date(app.lastUsed);
+      if (usageTime < startOfDay || usageTime > endOfDay) return;
+
+      if (!appUsageMap.has(app.name)) {
+        appUsageMap.set(app.name, {
+          name: app.name,
+          time: 0,
+          lastUsed: app.lastUsed,
+          category: app.category,
+          color: app.color,
+          icon: app.icon,
+          usageInstances: []
+        });
+      }
+      
+      const appData = appUsageMap.get(app.name)!;
+      const startTime = new Date(app.lastUsed.getTime() - app.time * 60000);
+      
+      // If the usage started before midnight, adjust the start time and duration
+      if (startTime < startOfDay) {
+        const adjustedDuration = (app.lastUsed.getTime() - startOfDay.getTime()) / (60 * 1000);
+        if (adjustedDuration > 0) {
+          appData.time += adjustedDuration;
+          appData.usageInstances.push({
+            startTime: startOfDay,
+            endTime: app.lastUsed,
+            duration: adjustedDuration
+          });
+        }
+      } else {
+        appData.time += app.time;
+        appData.usageInstances.push({
+          startTime,
+          endTime: app.lastUsed,
+          duration: app.time
+        });
+      }
+    });
+
+    // Convert map to array and sort by last used time
+    return Array.from(appUsageMap.values())
       .sort((a, b) => {
-        const timeA = a.lastUsed ? new Date(a.lastUsed).getTime() : 0;
-        const timeB = b.lastUsed ? new Date(b.lastUsed).getTime() : 0;
+        const timeA = a.lastUsed ? a.lastUsed.getTime() : 0;
+        const timeB = b.lastUsed ? b.lastUsed.getTime() : 0;
         return timeB - timeA;
       });
   };
 
-  const sortedTimelineData = getCurrentDayData();
+  const [sortedTimelineData, setSortedTimelineData] = useState<Array<{
+    name: string;
+    time: number;
+    lastUsed?: Date;
+    category: string;
+    color: string;
+    icon?: string;
+    usageInstances: Array<{ startTime: Date; endTime: Date; duration: number }>;
+  }>>([]);
+
+  useEffect(() => {
+    getCurrentDayData().then(data => {
+      setSortedTimelineData(data);
+    });
+  }, [appUsageData]);
 
   // Get most used app sorted by time
   const getMostUsedApp = () => {
@@ -673,80 +742,90 @@ const DetailedAnalytics = () => {
                     }}
                   />
                   
-                  {sortedTimelineData.map((app, index) => (
-                    <div
-                      key={index}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        marginBottom: '1.5rem',
-                        position: 'relative',
-                      }}
-                    >
-                      {/* Time */}
-                      <Text style={{ 
-                        width: '60px', 
-                        color: '#AAAAAA',
-                        fontSize: '0.9rem',
-                        marginRight: '20px',
-                        textAlign: 'right',
-                        fontWeight: 500
-                      }}>
-                        {formatTimelineTime(app.lastUsed)}
-                      </Text>
-                      
-                      {/* App icon container */}
-                      <div style={{
-                        position: 'relative',
-                        zIndex: 2,
-                        background: '#FFFFFF',
-                        borderRadius: '50%',
-                        padding: '2px',
-                        marginRight: '16px'
-                      }}>
-                        {app.icon ? (
-                          <img
-                            src={`data:image/png;base64,${app.icon}`}
-                            alt={app.name}
-                            style={{
+                  {sortedTimelineData
+                    .flatMap(app => 
+                      app.usageInstances.map(instance => ({
+                        ...instance,
+                        appName: app.name,
+                        appIcon: app.icon,
+                        appColor: app.color
+                      }))
+                    )
+                    .sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
+                    .map((instance, index) => (
+                      <div
+                        key={index}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          marginBottom: '1.5rem',
+                          position: 'relative',
+                        }}
+                      >
+                        {/* Time */}
+                        <Text style={{ 
+                          width: '60px', 
+                          color: '#AAAAAA',
+                          fontSize: '0.9rem',
+                          marginRight: '20px',
+                          textAlign: 'right',
+                          fontWeight: 500
+                        }}>
+                          {formatTimelineTime(instance.startTime)}
+                        </Text>
+                        
+                        {/* App icon container */}
+                        <div style={{
+                          position: 'relative',
+                          zIndex: 2,
+                          background: '#FFFFFF',
+                          borderRadius: '50%',
+                          padding: '2px',
+                          marginRight: '16px'
+                        }}>
+                          {instance.appIcon ? (
+                            <img
+                              src={`data:image/png;base64,${instance.appIcon}`}
+                              alt={instance.appName}
+                              style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '50%',
+                                objectFit: 'cover'
+                              }}
+                            />
+                          ) : (
+                            <div style={{
                               width: '32px',
                               height: '32px',
                               borderRadius: '50%',
-                              objectFit: 'cover'
-                            }}
-                          />
-                        ) : (
-                          <div style={{
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '50%',
-                            background: app.color,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '16px',
-                            color: '#FFFFFF'
+                              background: instance.appColor,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '16px',
+                              color: '#FFFFFF'
+                            }}>
+                              {instance.appName.charAt(0)}
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* App info */}
+                        <div style={{ flex: 1 }}>
+                          <Text style={{ 
+                            color: '#FFFFFF', 
+                            fontWeight: 500,
+                            marginBottom: '4px'
                           }}>
-                            {app.name.charAt(0)}
-                          </div>
-                        )}
+                            {instance.appName}
+                          </Text>
+                          <Text size="sm" style={{ color: '#AAAAAA' }}>
+                            {formatDetailedTime(instance.duration)}
+                          </Text>
+                        </div>
                       </div>
-                      
-                      {/* App info */}
-                      <div style={{ flex: 1 }}>
-                        <Text style={{ 
-                          color: '#FFFFFF', 
-                          fontWeight: 500,
-                          marginBottom: '4px'
-                        }}>
-                          {app.name}
-                        </Text>
-                        <Text size="sm" style={{ color: '#AAAAAA' }}>
-                          {formatDetailedTime(app.time)}
-                        </Text>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
                 </div>
               </div>
             )}
