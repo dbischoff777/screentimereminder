@@ -537,28 +537,23 @@ public class AppUsageTracker extends Plugin {
     @PluginMethod
     public void checkScreenTimeLimit(PluginCall call) {
         try {
-            // Get current screen time using the same method as Statistics.tsx and widget
+            // Get values from call data - these are the user's chosen values
+            JSObject data = call.getData();
+            int userLimit = data.has("limit") ? data.getInt("limit") : 30;
+            int userFrequency = data.has("notificationFrequency") ? data.getInt("notificationFrequency") : 30;
+            
+            // Immediately save user values to SharedPreferences
+            SharedPreferences.Editor editor = getContext().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
+            editor.putLong(KEY_SCREEN_TIME_LIMIT, userLimit);
+            editor.putLong(KEY_NOTIFICATION_FREQUENCY, userFrequency);
+            editor.putBoolean("userHasSetLimit", true);
+            editor.apply();
+            
+            // Get current screen time
             float totalTime = getTodayScreenTime(getContext());
             
-            // Get limit value and notification frequency from call data
-            JSObject data = call.getData();
-            int limit = data.has("limit") ? data.getInt("limit") : 60;
-            
-            // Get current notification frequency using the static method
-            long notificationFrequency = getNotificationFrequencyStatic(getContext());
-            
-            // Only update the limit if it's different from the current value
-            long currentLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-            if (currentLimit != limit) {
-                SharedPreferences.Editor editor = prefs.edit();
-                editor.putLong(KEY_SCREEN_TIME_LIMIT, limit);
-                editor.putBoolean("userHasSetLimit", true);
-                editor.apply();
-                Log.d(TAG, "Updating screen time limit from " + currentLimit + " to " + limit);
-            }
-
-            // Use the static method to check screen time limit and show notifications
-            checkScreenTimeLimitStatic(getContext(), Math.round(totalTime));
+            // Use the static method with user values
+            checkScreenTimeLimitStatic(getContext(), Math.round(totalTime), userFrequency);
 
             // Update widget
             Intent updateIntent = new Intent(getContext(), ScreenTimeWidgetProvider.class);
@@ -1719,21 +1714,32 @@ public class AppUsageTracker extends Plugin {
     public static int getScreenTimeLimitStatic(Context context) {
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            boolean userHasSetLimit = prefs.getBoolean("userHasSetLimit", false);
+            // Get the raw value to handle type conversion properly
+            Object limitValue = prefs.getAll().get(KEY_SCREEN_TIME_LIMIT);
+            long limit;
             
-            if (userHasSetLimit) {
-                // User has set a limit, always use their setting
-                long limit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-                Log.d(TAG, "getScreenTimeLimitStatic: Retrieved user-set limit: " + limit);
-                return (int) limit;
+            if (limitValue instanceof Integer) {
+                limit = ((Integer) limitValue).longValue();
+            } else if (limitValue instanceof Long) {
+                limit = (Long) limitValue;
+            } else {
+                // Use the last known value from SharedPreferences as fallback
+                limit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+                // Save it back to ensure consistent storage
+                prefs.edit().putLong(KEY_SCREEN_TIME_LIMIT, limit).apply();
             }
             
-            // No user setting, use default
-            Log.d(TAG, "getScreenTimeLimitStatic: No user setting, using default limit: " + DEFAULT_SCREEN_TIME_LIMIT);
-            return (int) DEFAULT_SCREEN_TIME_LIMIT;
+            Log.d(TAG, "getScreenTimeLimitStatic: Raw value: " + limitValue + ", Converted to: " + limit);
+            return (int) limit;
         } catch (Exception e) {
             Log.e(TAG, "Error getting screen time limit", e);
-            return (int) DEFAULT_SCREEN_TIME_LIMIT;
+            // On error, try to get the last known value
+            try {
+                SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+                return (int) prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+            } catch (Exception ex) {
+                return (int) DEFAULT_SCREEN_TIME_LIMIT; // Only use hardcoded default as last resort
+            }
         }
     }
 
@@ -1747,6 +1753,7 @@ public class AppUsageTracker extends Plugin {
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             SharedPreferences.Editor editor = prefs.edit();
             editor.putLong(KEY_SCREEN_TIME_LIMIT, (long) limitMinutes);
+            editor.putBoolean("userHasSetLimit", true); // Mark that user has set a limit
             editor.apply();
 
             // Update widget immediately
@@ -1896,14 +1903,32 @@ public class AppUsageTracker extends Plugin {
     public static int getNotificationFrequencyStatic(Context context) {
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            // First try to get it as a long since that's how it's stored
-            long frequencyLong = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L); // Default to 5 minutes
-            Log.d(TAG, "Getting notification frequency: " + frequencyLong + " minutes");
-            // Convert to int since that's what the app expects
+            // Get the raw value to handle type conversion properly
+            Object frequencyValue = prefs.getAll().get(KEY_NOTIFICATION_FREQUENCY);
+            long frequencyLong;
+            
+            if (frequencyValue instanceof Integer) {
+                frequencyLong = ((Integer) frequencyValue).longValue();
+            } else if (frequencyValue instanceof Long) {
+                frequencyLong = (Long) frequencyValue;
+            } else {
+                // Use the last known value from SharedPreferences as fallback
+                frequencyLong = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 30L);
+                // Save it back to ensure consistent storage
+                prefs.edit().putLong(KEY_NOTIFICATION_FREQUENCY, frequencyLong).apply();
+            }
+            
+            Log.d(TAG, "getNotificationFrequencyStatic: Raw value: " + frequencyValue + ", Converted to: " + frequencyLong);
             return (int) frequencyLong;
         } catch (Exception e) {
             Log.e(TAG, "Error getting notification frequency", e);
-            return 5; // Default to 5 minutes if there's an error
+            // On error, try to get the last known value
+            try {
+                SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+                return (int) prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 30L);
+            } catch (Exception ex) {
+                return 30; // Only use hardcoded default as last resort
+            }
         }
     }
 
@@ -1935,7 +1960,7 @@ public class AppUsageTracker extends Plugin {
     /**
      * Static method to check screen time limit and show notifications
      */
-    public static void checkScreenTimeLimitStatic(Context context, int totalMinutes) {
+    public static void checkScreenTimeLimitStatic(Context context, int totalMinutes, int notificationFrequency) {
         try {
             // Get the current screen time limit
             long screenTimeLimit = getScreenTimeLimitStatic(context);
@@ -1951,8 +1976,6 @@ public class AppUsageTracker extends Plugin {
             long currentTime = System.currentTimeMillis();
             
             // Get notification frequency from settings (in minutes)
-            long notificationFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L); // Default to 5 minutes if not set
-            // Convert to milliseconds for comparison
             long NOTIFICATION_COOLDOWN = notificationFrequency * 60 * 1000;
             
             Log.d(TAG, "Notification frequency: " + notificationFrequency + " minutes");
