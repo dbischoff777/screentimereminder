@@ -169,8 +169,19 @@ const DetailedAnalytics = () => {
     todayData.forEach(app => {
       if (!app.lastUsed) return;
       const usageTime = new Date(app.lastUsed);
-      const hour = usageTime.getHours();
-      hourlyData[hour] += app.time || 0;
+      const startTime = new Date(usageTime.getTime() - app.time * 60000);
+      
+      // If the usage started before midnight, adjust the start time and duration
+      if (startTime < startOfDay) {
+        const adjustedDuration = (usageTime.getTime() - startOfDay.getTime()) / (60 * 1000);
+        if (adjustedDuration > 0) {
+          const hour = usageTime.getHours();
+          hourlyData[hour] += adjustedDuration;
+        }
+      } else {
+        const hour = usageTime.getHours();
+        hourlyData[hour] += app.time;
+      }
     });
 
     return hourlyData;
@@ -513,10 +524,10 @@ const DetailedAnalytics = () => {
                 color: '#FFFFFF',
               }}>
                 <Text size="xl" fw={700}>
-                  {Math.floor(totalScreenTime / 60)}h
+                  {Math.floor(heatmapData.reduce((sum, val) => sum + val, 0) / 60)}h
                 </Text>
                 <Text size="sm">
-                  {Math.round(totalScreenTime % 60)}m
+                  {Math.round(heatmapData.reduce((sum, val) => sum + val, 0) % 60)}m
                 </Text>
               </div>
             </div>
