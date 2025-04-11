@@ -67,47 +67,8 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
 
     private float getTodayScreenTime(Context context) {
         try {
-            // Get start of day
-            Calendar calendar = Calendar.getInstance();
-            calendar.set(Calendar.HOUR_OF_DAY, 0);
-            calendar.set(Calendar.MINUTE, 0);
-            calendar.set(Calendar.SECOND, 0);
-            calendar.set(Calendar.MILLISECOND, 0);
-            long startTime = calendar.getTimeInMillis();
-            long endTime = System.currentTimeMillis();
-
-            // Get app usage data
-            UsageStatsManager usageStatsManager = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
-            if (usageStatsManager == null) {
-                return 0;
-            }
-
-            List<UsageStats> stats = usageStatsManager.queryUsageStats(
-                UsageStatsManager.INTERVAL_DAILY, startTime, endTime
-            );
-
-            if (stats == null) {
-                return 0;
-            }
-
-            float totalMinutes = 0;
-            String ourPackage = context.getPackageName();
-
-            for (UsageStats stat : stats) {
-                String packageName = stat.getPackageName();
-                
-                // Skip our own app and system apps
-                if (packageName.equals(ourPackage) || isSystemApp(context, packageName)) {
-                    continue;
-                }
-
-                // Only count time if the app was used today
-                if (stat.getLastTimeUsed() >= startTime) {
-                    totalMinutes += stat.getTotalTimeInForeground() / (60f * 1000f);
-                }
-            }
-
-            return totalMinutes;
+            // Use AppUsageTracker's calculateScreenTime method for consistency
+            return AppUsageTracker.calculateScreenTime(context);
         } catch (Exception e) {
             Log.e(TAG, "Error getting today's screen time", e);
             return 0;

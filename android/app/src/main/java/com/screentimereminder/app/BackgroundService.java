@@ -448,23 +448,23 @@ public class BackgroundService extends Service {
 
     private void updateAppUsage() {
         try {
-            // Get current screen time using the same method as Statistics.tsx and widget
-            float totalTime = getTodayScreenTime(this);
-            
-            // Get limit value from SharedPreferences
+            // Get fresh values from SharedPreferences each time
             SharedPreferences prefs = getSharedPreferences(AppUsageTracker.PREFS_NAME, Context.MODE_PRIVATE);
-            long screenTimeLimit = prefs.getLong(AppUsageTracker.KEY_SCREEN_TIME_LIMIT, AppUsageTracker.DEFAULT_SCREEN_TIME_LIMIT);
             
-            // Get notification frequency using AppUsageTracker's static method
-            long notificationFrequency = AppUsageTracker.getNotificationFrequencyStatic(this);
+            // Get current screen time using AppUsageTracker's method for consistency
+            float totalTime = AppUsageTracker.calculateScreenTime(this);
+            
+            // Get limit and frequency values directly from SharedPreferences
+            long screenTimeLimit = prefs.getLong(AppUsageTracker.KEY_SCREEN_TIME_LIMIT, AppUsageTracker.DEFAULT_SCREEN_TIME_LIMIT);
+            long notificationFrequency = prefs.getLong(AppUsageTracker.KEY_NOTIFICATION_FREQUENCY, 5L);
             long lastNotificationTime = prefs.getLong(AppUsageTracker.KEY_LAST_LIMIT_NOTIFICATION, 0);
             long currentTime = System.currentTimeMillis();
             long NOTIFICATION_COOLDOWN = notificationFrequency * 60 * 1000;
             
-            Log.d(TAG, "Background service update - Total time: " + totalTime + 
-                  ", Limit: " + screenTimeLimit + 
-                  ", Notification frequency: " + notificationFrequency + 
-                  ", Time since last notification: " + ((currentTime - lastNotificationTime) / 60000) + " minutes");
+            Log.d(TAG, String.format("Background service update - Total time: %.2f, Limit: %d, Notification frequency: %d, Time since last notification: %d minutes, Cooldown: %d minutes", 
+                totalTime, screenTimeLimit, notificationFrequency, 
+                (currentTime - lastNotificationTime) / 60000,
+                NOTIFICATION_COOLDOWN / 60000));
             
             // Only check for notifications if enough time has passed since the last notification
             if (currentTime - lastNotificationTime >= NOTIFICATION_COOLDOWN) {
@@ -476,14 +476,50 @@ public class BackgroundService extends Service {
                             screenTimeLimit, Math.round(totalTime)));
                     
                     // Update last notification time
-                    prefs.edit().putLong(AppUsageTracker.KEY_LAST_LIMIT_NOTIFICATION, currentTime).apply();
-                    Log.d(TAG, "Background service showing notification after " + notificationFrequency + " minutes");
+                    SharedPreferences.Editor editor = prefs.edit();
+                    editor.putLong(AppUsageTracker.KEY_LAST_LIMIT_NOTIFICATION, currentTime);
+                    editor.apply();
+                    
+                    Log.d(TAG, "Background service showing limit reached notification after " + notificationFrequency + " minutes");
+                } else if (totalTime >= screenTimeLimit * 0.9) {
+                    // Show approaching limit notification at 90%
+                    showNotification("Approaching Screen Time Limit", 
+                        String.format("You have %d minutes remaining.\nCurrent usage: %d minutes\nDaily limit: %d minutes", 
+                            Math.round(screenTimeLimit - totalTime), Math.round(totalTime), screenTimeLimit));
+                    
+                    // Update last notification time
+                    SharedPreferences.Editor editor = prefs.edit();
+                    editor.putLong(AppUsageTracker.KEY_LAST_LIMIT_NOTIFICATION, currentTime);
+                    editor.apply();
+                    
+                    Log.d(TAG, "Background service showing approaching limit notification after " + notificationFrequency + " minutes");
                 }
             } else {
                 Log.d(TAG, "Background service skipping notification - " + 
                     ((NOTIFICATION_COOLDOWN - (currentTime - lastNotificationTime)) / 60000) + 
                     " minutes until next notification");
             }
+
+            // Update widget with latest values
+            Intent updateIntent = new Intent(this, ScreenTimeWidgetProvider.class);
+            updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
+            int[] ids = AppWidgetManager.getInstance(this)
+                .getAppWidgetIds(new ComponentName(this, ScreenTimeWidgetProvider.class));
+            updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+            updateIntent.putExtra("totalScreenTime", totalTime);
+            updateIntent.putExtra("screenTimeLimit", screenTimeLimit);
+            sendBroadcast(updateIntent);
+
+            // Broadcast update to other components
+            Intent broadcastIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
+            JSONObject updateData = new JSONObject();
+            updateData.put("totalScreenTime", totalTime);
+            updateData.put("screenTimeLimit", screenTimeLimit);
+            updateData.put("notificationFrequency", notificationFrequency);
+            updateData.put("timestamp", System.currentTimeMillis());
+            broadcastIntent.putExtra("usageData", updateData.toString());
+            sendBroadcast(broadcastIntent);
+
         } catch (Exception e) {
             Log.e(TAG, "Error updating app usage", e);
         }
@@ -812,24 +848,32 @@ public class BackgroundService extends Service {
                 scheduler.shutdown();
             }
 
-            // Get notification frequency using AppUsageTracker's static method
-            long notificationFrequency = AppUsageTracker.getNotificationFrequencyStatic(this);
-            long updateInterval = notificationFrequency * 60 * 1000; // Convert to milliseconds
+            // Always update every minute to ensure we have fresh data
+            final long UPDATE_INTERVAL = 60 * 1000; // 1 minute in milliseconds
             
-            Log.d(TAG, "Starting periodic updates with frequency: " + notificationFrequency + " minutes");
+            Log.d(TAG, "Starting periodic updates with 1 minute interval");
 
             scheduler = Executors.newSingleThreadScheduledExecutor();
             scheduler.scheduleAtFixedRate(() -> {
                 try {
                     if (isTracking) {
+                        // Get fresh values each time
+                        SharedPreferences currentPrefs = getSharedPreferences(AppUsageTracker.PREFS_NAME, Context.MODE_PRIVATE);
+                        long currentLimit = currentPrefs.getLong(AppUsageTracker.KEY_SCREEN_TIME_LIMIT, AppUsageTracker.DEFAULT_SCREEN_TIME_LIMIT);
+                        long currentFrequency = currentPrefs.getLong(AppUsageTracker.KEY_NOTIFICATION_FREQUENCY, 5L);
+                        
+                        Log.d(TAG, "Periodic update with current values - Frequency: " + currentFrequency + 
+                              " minutes, Limit: " + currentLimit + " minutes");
+                        
+                        // Update app usage with current values
                         updateAppUsage();
                     }
                 } catch (Exception e) {
                     Log.e(TAG, "Error in periodic update", e);
                 }
-            }, 0, updateInterval, TimeUnit.MILLISECONDS);
+            }, 0, 1, TimeUnit.MINUTES);
 
-            Log.d(TAG, "Periodic updates scheduled every " + notificationFrequency + " minutes");
+            Log.d(TAG, "Periodic updates scheduled every minute");
         } catch (Exception e) {
             Log.e(TAG, "Error starting periodic updates", e);
         }
@@ -901,12 +945,16 @@ public class BackgroundService extends Service {
 
     private void showNotification(String title, String message) {
         try {
-            // Get notification frequency using AppUsageTracker's static method
-            long notificationFrequency = AppUsageTracker.getNotificationFrequencyStatic(this);
+            // Get fresh values from SharedPreferences
             SharedPreferences prefs = getSharedPreferences(AppUsageTracker.PREFS_NAME, Context.MODE_PRIVATE);
+            long notificationFrequency = prefs.getLong(AppUsageTracker.KEY_NOTIFICATION_FREQUENCY, 5L);
             long lastNotificationTime = prefs.getLong(AppUsageTracker.KEY_LAST_LIMIT_NOTIFICATION, 0);
             long currentTime = System.currentTimeMillis();
             long NOTIFICATION_COOLDOWN = notificationFrequency * 60 * 1000;
+            
+            Log.d(TAG, "Attempting to show notification - Time since last: " + 
+                ((currentTime - lastNotificationTime) / 60000) + " minutes, Cooldown: " + 
+                (NOTIFICATION_COOLDOWN / 60000) + " minutes");
             
             // Check if enough time has passed since the last notification
             if (currentTime - lastNotificationTime >= NOTIFICATION_COOLDOWN) {
@@ -916,8 +964,13 @@ public class BackgroundService extends Service {
                     NotificationChannel channel = new NotificationChannel(
                         "screen_time_channel",
                         "Screen Time Notifications",
-                        NotificationManager.IMPORTANCE_DEFAULT
+                        NotificationManager.IMPORTANCE_HIGH
                     );
+                    channel.setDescription("Screen time limit notifications");
+                    channel.enableLights(true);
+                    channel.setLightColor(Color.RED);
+                    channel.enableVibration(true);
+                    channel.setVibrationPattern(new long[]{0, 1000, 500, 1000});
                     notificationManager.createNotificationChannel(channel);
                 }
                 
@@ -926,17 +979,21 @@ public class BackgroundService extends Service {
                     .setContentTitle(title)
                     .setContentText(message)
                     .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
-                    .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                    .setAutoCancel(true);
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setAutoCancel(true)
+                    .setVibrate(new long[]{0, 1000, 500, 1000})
+                    .setLights(Color.RED, 3000, 3000);
                 
                 // Use a consistent notification ID (1) for both types of notifications
                 // This ensures that new notifications will replace old ones
                 notificationManager.notify(1, builder.build());
                 
                 // Update last notification time
-                prefs.edit().putLong(AppUsageTracker.KEY_LAST_LIMIT_NOTIFICATION, currentTime).apply();
+                SharedPreferences.Editor editor = prefs.edit();
+                editor.putLong(AppUsageTracker.KEY_LAST_LIMIT_NOTIFICATION, currentTime);
+                editor.apply();
                 
-                Log.d(TAG, "Showing notification: " + title + " - " + message);
+                Log.d(TAG, "Successfully showed notification: " + title + " - " + message);
             } else {
                 Log.d(TAG, "Skipping notification - " + 
                     ((NOTIFICATION_COOLDOWN - (currentTime - lastNotificationTime)) / 60000) + 
