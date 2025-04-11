@@ -482,4 +482,18 @@ export default class AppUsageTrackerService {
       return 30; // Default to 30 minutes
     }
   }
+
+  /**
+   * Get total screen time for the current day
+   */
+  public async getTotalScreenTime(): Promise<number> {
+    try {
+      console.log('AppUsageTracker: Getting total screen time');
+      const prefs = await this.getSharedPreferences();
+      return prefs.totalScreenTime;
+    } catch (error) {
+      console.error('Error getting total screen time:', error);
+      return 0;
+    }
+  }
 } 

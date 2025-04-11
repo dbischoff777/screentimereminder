@@ -539,16 +539,53 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
       console.log('ScreenTimeContext: Updating app usage data');
       const appUsageTracker = AppUsageTrackerService.getInstance();
       
-      // Get fresh data from native layer
+      // Get fresh data from native layer using the more accurate method
       const data = await appUsageTracker.getAppUsageData();
       console.log('ScreenTimeContext: Received app usage data:', data);
       
       if (data && Array.isArray(data)) {
-        // Update state with new data
-        setAppUsageData(data);
+        // Process and enhance the data
+        const processedData = data.map(app => {
+          // Determine the category based on app name if not provided
+          let category = app.category;
+          if (!category) {
+            if (/instagram|facebook|twitter|tiktok|snapchat|whatsapp|telegram|messenger/i.test(app.name)) {
+              category = 'Social Media';
+            } else if (/youtube|netflix|hulu|disney|spotify|music|video|player|movie/i.test(app.name)) {
+              category = 'Entertainment';
+            } else if (/chrome|safari|firefox|edge|browser|gmail|outlook|office|word|excel|powerpoint|docs/i.test(app.name)) {
+              category = 'Productivity';
+            } else if (/game|games|gaming|play|puzzle|candy|clash|craft/i.test(app.name)) {
+              category = 'Games';
+            } else if (/learn|education|school|course|study|duolingo|khan|quiz/i.test(app.name)) {
+              category = 'Education';
+            } else {
+              category = 'Other';
+            }
+          }
+
+          // Get color based on category
+          const color = getCategoryColor(category);
+
+          return {
+            name: app.name || 'Unknown App',
+            time: app.time || 0,
+            color: color,
+            lastUsed: app.lastUsed ? new Date(app.lastUsed) : undefined,
+            category: category,
+            isActive: false,
+            icon: app.icon
+          };
+        });
+
+        // Update state with processed data
+        setAppUsageData(processedData);
         
-        // Check screen time limit
-        const totalTime = getTotalScreenTime();
+        // Get total screen time using the native method for accuracy
+        const totalTime = await appUsageTracker.getTotalScreenTime();
+        console.log('ScreenTimeContext: Total screen time:', totalTime);
+        
+        // Check screen time limit with the accurate total
         await appUsageTracker.checkScreenTimeLimit({
           totalTime,
           limit: screenTimeLimit,

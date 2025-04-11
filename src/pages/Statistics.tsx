@@ -88,7 +88,7 @@ const Statistics = () => {
   // Filter and sort current day's data
   const getCurrentDayData = () => {
     const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
     return [...appUsageData]
