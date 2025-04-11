@@ -88,17 +88,56 @@ const Statistics = () => {
   // Filter and sort current day's data
   const getCurrentDayData = () => {
     const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-    return [...appUsageData]
-      .filter(app => {
-        const appTime = app.lastUsed ? new Date(app.lastUsed) : null;
-        return appTime && appTime >= startOfDay && appTime <= endOfDay;
-      })
+    // Group usage events by app and calculate total time for each
+    const appUsageMap = new Map<string, {
+      name: string;
+      time: number;
+      lastUsed?: Date;
+      category: string;
+      color: string;
+      icon?: string;
+    }>();
+
+    appUsageData.forEach(app => {
+      if (!app.lastUsed) return;
+      
+      // Ensure lastUsed is a Date object
+      const lastUsed = app.lastUsed instanceof Date ? app.lastUsed : new Date(app.lastUsed);
+      if (lastUsed < startOfDay || lastUsed > endOfDay) return;
+
+      if (!appUsageMap.has(app.name)) {
+        appUsageMap.set(app.name, {
+          name: app.name,
+          time: 0,
+          lastUsed: lastUsed,
+          category: app.category,
+          color: app.color,
+          icon: app.icon
+        });
+      }
+      
+      const appData = appUsageMap.get(app.name)!;
+      const startTime = new Date(lastUsed.getTime() - app.time * 60000);
+      
+      // If the usage started before midnight, adjust the start time and duration
+      if (startTime < startOfDay) {
+        const adjustedDuration = (lastUsed.getTime() - startOfDay.getTime()) / (60 * 1000);
+        if (adjustedDuration > 0) {
+          appData.time += adjustedDuration;
+        }
+      } else {
+        appData.time += app.time;
+      }
+    });
+
+    // Convert map to array and sort by last used time
+    return Array.from(appUsageMap.values())
       .sort((a, b) => {
-        const timeA = a.lastUsed ? new Date(a.lastUsed).getTime() : 0;
-        const timeB = b.lastUsed ? new Date(b.lastUsed).getTime() : 0;
+        const timeA = a.lastUsed ? a.lastUsed.getTime() : 0;
+        const timeB = b.lastUsed ? b.lastUsed.getTime() : 0;
         return timeB - timeA;
       });
   };
