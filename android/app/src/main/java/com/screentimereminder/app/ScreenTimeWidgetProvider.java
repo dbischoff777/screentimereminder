@@ -163,10 +163,6 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
             );
             
-            Log.d(TAG, "Setting refresh button click listener");
-            views.setOnClickPendingIntent(R.id.refresh_button, refreshPendingIntent);
-            
-            Log.d(TAG, "Calling updateAppWidget for widget ID: " + appWidgetId);
             // Update widget
             appWidgetManager.updateAppWidget(appWidgetId, views);
             

@@ -53,15 +53,6 @@
             android:layout_marginBottom="8dp"
             android:progressDrawable="@drawable/widget_progress"/>
 
-        <ImageButton
-            android:id="@+id/refresh_button"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:layout_gravity="center"
-            android:background="?android:attr/selectableItemBackgroundBorderless"
-            android:src="@drawable/ic_refresh"
-            android:contentDescription="Refresh widget"/>
-
     </LinearLayout>
 
 </RelativeLayout> 
