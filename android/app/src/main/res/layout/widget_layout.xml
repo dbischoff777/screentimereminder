@@ -15,7 +15,7 @@
             android:id="@+id/time_text"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Used: 0m"
+            android:text="Screen Time: 0m"
             android:textColor="#00FFFF"
             android:textSize="16sp"
             android:textStyle="bold"
