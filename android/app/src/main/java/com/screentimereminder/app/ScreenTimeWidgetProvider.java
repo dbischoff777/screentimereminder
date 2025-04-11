@@ -27,13 +27,29 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
     private static final String ACTION_UPDATE_WIDGET = "com.screentimereminder.app.UPDATE_WIDGET";
     private static final long DEBOUNCE_TIME = 1000; // 1 second debounce
     private static long lastUpdateTime = 0;
+    private static final long DEFAULT_SCREEN_TIME_LIMIT = 120; // Default limit in minutes
+    private static final String KEY_SCREEN_TIME_LIMIT = "screenTimeLimit";
 
     @Override
     public void onUpdate(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
         try {
             // Get fresh data using the same method as Statistics.tsx
             float currentScreenTime = getTodayScreenTime(context);
-            int screenTimeLimit = AppUsageTracker.getScreenTimeLimitStatic(context);
+            
+            // Always get the limit from SharedPreferences to respect user settings
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            boolean userHasSetLimit = prefs.getBoolean("userHasSetLimit", false);
+            int screenTimeLimit;
+            
+            if (userHasSetLimit) {
+                // User has set a limit, always use their setting
+                screenTimeLimit = (int) prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+                Log.d(TAG, "Using user-set limit: " + screenTimeLimit);
+            } else {
+                // No user setting, use default
+                screenTimeLimit = (int) DEFAULT_SCREEN_TIME_LIMIT;
+                Log.d(TAG, "No user setting, using default limit: " + screenTimeLimit);
+            }
             
             Log.d(TAG, "Widget onUpdate called with values - Time: " + currentScreenTime + ", Limit: " + screenTimeLimit);
 

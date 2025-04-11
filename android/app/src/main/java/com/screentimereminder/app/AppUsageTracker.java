@@ -305,11 +305,11 @@ public class AppUsageTracker extends Plugin {
             // Get current usage stats
             UsageStatsManager usageStatsManager = (UsageStatsManager) getContext().getSystemService(Context.USAGE_STATS_SERVICE);
             if (usageStatsManager != null) {
-                long startTime = getStartOfDay();
+                long dayStartTime = getStartOfDay();
                 long endTime = System.currentTimeMillis();
                 
                 // Query usage events for more accurate calculation
-                UsageEvents usageEvents = usageStatsManager.queryEvents(startTime, endTime);
+                UsageEvents usageEvents = usageStatsManager.queryEvents(dayStartTime, endTime);
                 UsageEvents.Event event = new UsageEvents.Event();
                 float nativeTotalTime = 0;
                 String lastPackage = null;
@@ -578,8 +578,37 @@ public class AppUsageTracker extends Plugin {
     }
 
     private float getTodayScreenTime(Context context) {
+        // Use the static calculateScreenTime method which is more accurate
+        return calculateScreenTime(context);
+    }
+
+    private long getTotalScreenTimeForToday() {
         try {
-            // Get start of day
+            // Use the more accurate calculateScreenTime method
+            return Math.round(calculateScreenTime(getContext()) * 60 * 1000); // Convert minutes to milliseconds
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting total screen time for today", e);
+            return 0;
+        }
+    }
+
+    public int getTotalScreenTime() {
+        try {
+            // Use the static method for consistency
+            return Math.round(calculateScreenTime(getContext()));
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting total screen time", e);
+            return 0;
+        }
+    }
+
+    /**
+     * Calculate screen time for today using the most accurate method
+     * Returns total screen time in minutes for the current day only
+     */
+    public static float calculateScreenTime(Context context) {
+        try {
+            // Get start of day in user's local timezone
             Calendar calendar = Calendar.getInstance();
             calendar.set(Calendar.HOUR_OF_DAY, 0);
             calendar.set(Calendar.MINUTE, 0);
@@ -588,44 +617,136 @@ public class AppUsageTracker extends Plugin {
             long startTime = calendar.getTimeInMillis();
             long endTime = System.currentTimeMillis();
 
-            // Get app usage data
+            Log.d(TAG, String.format("Calculating screen time from %s to %s", 
+                new Date(startTime).toString(), new Date(endTime).toString()));
+
             UsageStatsManager usageStatsManager = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
             if (usageStatsManager == null) {
-                return 0;
+                Log.e(TAG, "UsageStatsManager is null");
+                return getFallbackScreenTime(context);
             }
 
-            List<UsageStats> stats = usageStatsManager.queryUsageStats(
-                UsageStatsManager.INTERVAL_DAILY, startTime, endTime
-            );
-
-            if (stats == null) {
-                return 0;
+            // First try to get aggregated stats for a quick calculation
+            Map<String, UsageStats> aggregatedStats = usageStatsManager.queryAndAggregateUsageStats(startTime, endTime);
+            if (aggregatedStats != null && !aggregatedStats.isEmpty()) {
+                float totalMinutes = 0;
+                String ourPackage = context.getPackageName();
+                
+                for (Map.Entry<String, UsageStats> entry : aggregatedStats.entrySet()) {
+                    String packageName = entry.getKey();
+                    UsageStats stat = entry.getValue();
+                    
+                    // Skip our own app and system apps
+                    if (packageName.equals(ourPackage) || isSystemApp(context, packageName)) {
+                        continue;
+                    }
+                    
+                    // Only count time if the app was used today
+                    if (stat.getLastTimeUsed() >= startTime) {
+                        totalMinutes += stat.getTotalTimeInForeground() / (60f * 1000f);
+                    }
+                }
+                
+                // Store the calculated value with timestamp
+                SharedPreferences.Editor editor = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
+                editor.putFloat(KEY_TOTAL_SCREEN_TIME, totalMinutes);
+                editor.putLong(KEY_LAST_UPDATE, System.currentTimeMillis());
+                editor.apply();
+                
+                Log.d(TAG, "Total screen time for today (aggregated): " + totalMinutes + " minutes");
+                return totalMinutes;
             }
 
-            float totalMinutes = 0;
+            // If aggregated stats failed, try using usage events
+            UsageEvents usageEvents = usageStatsManager.queryEvents(startTime, endTime);
+            if (usageEvents == null) {
+                Log.w(TAG, "No usage events available for today");
+                return getFallbackScreenTime(context);
+            }
+
+            Map<String, Long> appUsageTimes = new HashMap<>();
+            Map<String, Long> lastForegroundTimes = new HashMap<>();
+            Set<String> foregroundApps = new HashSet<>();
+            UsageEvents.Event event = new UsageEvents.Event();
             String ourPackage = context.getPackageName();
 
-            for (UsageStats stat : stats) {
-                String packageName = stat.getPackageName();
+            while (usageEvents.hasNextEvent()) {
+                usageEvents.getNextEvent(event);
+                String packageName = event.getPackageName();
                 
                 // Skip our own app and system apps
                 if (packageName.equals(ourPackage) || isSystemApp(context, packageName)) {
                     continue;
                 }
 
-                // Only count time if the app was used today
-                if (stat.getLastTimeUsed() >= startTime) {
-                    totalMinutes += stat.getTotalTimeInForeground() / (60f * 1000f);
+                switch (event.getEventType()) {
+                    case UsageEvents.Event.MOVE_TO_FOREGROUND:
+                        lastForegroundTimes.put(packageName, event.getTimeStamp());
+                        foregroundApps.add(packageName);
+                        break;
+                    case UsageEvents.Event.MOVE_TO_BACKGROUND:
+                        Long appStartTime = lastForegroundTimes.get(packageName);
+                        if (appStartTime != null) {
+                            long timeSpent = event.getTimeStamp() - appStartTime;
+                            if (timeSpent >= 1000 && timeSpent < 4 * 60 * 60 * 1000) {
+                                Long currentTotal = appUsageTimes.getOrDefault(packageName, 0L);
+                                appUsageTimes.put(packageName, currentTotal + timeSpent);
+                            }
+                        }
+                        foregroundApps.remove(packageName);
+                        break;
                 }
             }
 
+            // Handle any apps still in foreground
+            for (String packageName : new HashSet<>(foregroundApps)) {
+                Long appStartTime = lastForegroundTimes.get(packageName);
+                if (appStartTime != null) {
+                    long effectiveStartTime = Math.max(appStartTime, startTime);
+                    long timeSpent = endTime - effectiveStartTime;
+                    if (timeSpent >= 1000 && timeSpent < 4 * 60 * 60 * 1000) {
+                        Long currentTotal = appUsageTimes.getOrDefault(packageName, 0L);
+                        appUsageTimes.put(packageName, currentTotal + timeSpent);
+                    }
+                }
+            }
+
+            // Calculate total minutes
+            float totalMinutes = 0;
+            for (Map.Entry<String, Long> entry : appUsageTimes.entrySet()) {
+                float minutes = entry.getValue() / (60f * 1000f);
+                totalMinutes += minutes;
+                Log.d(TAG, String.format("%s: %.2f minutes", 
+                    getAppName(context, entry.getKey()), minutes));
+            }
+
+            // Store the calculated value with timestamp
+            SharedPreferences.Editor editor = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
+            editor.putFloat(KEY_TOTAL_SCREEN_TIME, totalMinutes);
+            editor.putLong(KEY_LAST_UPDATE, System.currentTimeMillis());
+            editor.apply();
+
+            Log.d(TAG, "Total screen time for today (events): " + totalMinutes + " minutes");
             return totalMinutes;
         } catch (Exception e) {
-            Log.e(TAG, "Error getting today's screen time", e);
-            return 0;
+            Log.e(TAG, "Error getting total screen time", e);
+            return getFallbackScreenTime(context);
         }
     }
-    
+
+    private static float getFallbackScreenTime(Context context) {
+        SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+        long lastUpdate = prefs.getLong(KEY_LAST_UPDATE, 0);
+        long currentTime = System.currentTimeMillis();
+        
+        // If the last update was within the last hour, use the cached value
+        if (currentTime - lastUpdate < 60 * 60 * 1000) {
+            return prefs.getFloat(KEY_TOTAL_SCREEN_TIME, 0);
+        }
+        
+        return 0;
+    }
+
     @PluginMethod
     public void getSharedPreferences(PluginCall call) {
         try {
@@ -1047,61 +1168,6 @@ public class AppUsageTracker extends Plugin {
         } catch (Exception e) {
             Log.e(TAG, "Error requesting app info permission", e);
         }
-    }
-
-    private long getTotalScreenTimeForToday() {
-        try {
-            long totalMinutes = 0;
-            long startTime = getStartOfDay();
-            long endTime = System.currentTimeMillis();
-            
-            UsageStatsManager usageStatsManager = (UsageStatsManager) getContext()
-                .getSystemService(Context.USAGE_STATS_SERVICE);
-            
-            if (usageStatsManager == null) {
-                Log.e(TAG, "UsageStatsManager is null");
-                return 0;
-            }
-            
-            // Query for today's usage stats
-            Map<String, UsageStats> stats = usageStatsManager
-                .queryAndAggregateUsageStats(startTime, endTime);
-            
-            if (stats == null || stats.isEmpty()) {
-                Log.w(TAG, "No usage stats available for today");
-                return 0;
-            }
-            
-            // Calculate total time excluding our own app and system apps
-            String ourPackage = getContext().getPackageName();
-            for (Map.Entry<String, UsageStats> entry : stats.entrySet()) {
-                String packageName = entry.getKey();
-                UsageStats usageStats = entry.getValue();
-                
-                // Skip our own app and system apps
-                if (packageName.equals(ourPackage) || isSystemApp(getContext(), packageName)) {
-                    continue;
-                }
-                
-                // Convert to minutes
-                long timeInForeground = usageStats.getTotalTimeInForeground();
-                totalMinutes += timeInForeground / (1000 * 60);
-            }
-            
-            return totalMinutes;
-        } catch (Exception e) {
-            Log.e(TAG, "Error getting total screen time for today", e);
-            return 0;
-        }
-    }
-
-    public static long getStartOfDay() {
-        Calendar calendar = Calendar.getInstance();
-        calendar.set(Calendar.HOUR_OF_DAY, 0);
-        calendar.set(Calendar.MINUTE, 0);
-        calendar.set(Calendar.SECOND, 0);
-        calendar.set(Calendar.MILLISECOND, 0);
-        return calendar.getTimeInMillis();
     }
 
     private void ensureServiceRunning() {
@@ -1532,39 +1598,6 @@ public class AppUsageTracker extends Plugin {
         }
     }
 
-    public int getTotalScreenTime() {
-        try {
-            if (usageStatsManager == null) {
-                Log.e(TAG, "UsageStatsManager is null");
-                return 0;
-            }
-
-            long endTime = System.currentTimeMillis();
-            long startTime = getStartOfDay();
-            
-            Map<String, UsageStats> stats = usageStatsManager.queryAndAggregateUsageStats(startTime, endTime);
-            long totalTime = 0;
-            
-            for (UsageStats stat : stats.values()) {
-                if (!isSystemApp(getContext(), stat.getPackageName()) && !stat.getPackageName().equals(getContext().getPackageName())) {
-                    totalTime += stat.getTotalTimeInForeground();
-                }
-            }
-            
-            // Convert milliseconds to minutes and store in preferences
-            int totalMinutes = (int) (totalTime / (60 * 1000));
-            prefs.edit()
-                .putFloat(KEY_TOTAL_SCREEN_TIME, totalMinutes)
-                .putLong(KEY_LAST_UPDATE, System.currentTimeMillis())
-                .apply();
-            
-            return totalMinutes;
-        } catch (Exception e) {
-            Log.e(TAG, "Error getting total screen time", e);
-            return 0;
-        }
-    }
-
     public long getScreenTimeLimit() {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
         boolean userHasSetLimit = prefs.getBoolean("userHasSetLimit", false);
@@ -1605,16 +1638,11 @@ public class AppUsageTracker extends Plugin {
             }
 
             // Get today's start time
-            Calendar calendar = Calendar.getInstance();
-            calendar.set(Calendar.HOUR_OF_DAY, 0);
-            calendar.set(Calendar.MINUTE, 0);
-            calendar.set(Calendar.SECOND, 0);
-            calendar.set(Calendar.MILLISECOND, 0);
-            long startTime = calendar.getTimeInMillis();
+            long dayStartTime = getStartOfDay();
             long endTime = System.currentTimeMillis();
 
             List<UsageStats> stats = manager.queryUsageStats(
-                UsageStatsManager.INTERVAL_DAILY, startTime, endTime);
+                UsageStatsManager.INTERVAL_DAILY, dayStartTime, endTime);
 
             if (stats == null) {
                 Log.e(TAG, "Usage stats list is null");
@@ -1739,163 +1767,6 @@ public class AppUsageTracker extends Plugin {
 
         Log.d(TAG, "Calculating screen time from " + stackTrace[2].getClassName() + "." + stackTrace[2].getMethodName());
         return Math.round(calculateScreenTime(context));
-    }
-
-    /**
-     * Calculate screen time for today using the most accurate method
-     * Returns total screen time in minutes for the current day only
-     */
-    public static float calculateScreenTime(Context context) {
-        try {
-            // Get start of day in user's local timezone
-            Calendar calendar = Calendar.getInstance();
-            calendar.set(Calendar.HOUR_OF_DAY, 0);
-            calendar.set(Calendar.MINUTE, 0);
-            calendar.set(Calendar.SECOND, 0);
-            calendar.set(Calendar.MILLISECOND, 0);
-            long startTime = calendar.getTimeInMillis();
-            long endTime = System.currentTimeMillis();
-
-            Log.d(TAG, String.format("Calculating screen time from %s to %s", 
-                new Date(startTime).toString(), new Date(endTime).toString()));
-
-            UsageStatsManager usageStatsManager = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
-            if (usageStatsManager == null) {
-                Log.e(TAG, "UsageStatsManager is null");
-                return getFallbackScreenTime(context);
-            }
-
-            // Query usage events for more accurate calculation
-            UsageEvents usageEvents = usageStatsManager.queryEvents(startTime, endTime);
-            if (usageEvents == null) {
-                Log.w(TAG, "No usage events available for today");
-                return getFallbackScreenTime(context);
-            }
-
-            Map<String, Long> appUsageTimes = new HashMap<>();
-            Map<String, Long> lastForegroundTimes = new HashMap<>();
-            Set<String> foregroundApps = new HashSet<>();
-            UsageEvents.Event event = new UsageEvents.Event();
-            String ourPackage = context.getPackageName();
-
-            while (usageEvents.hasNextEvent()) {
-                usageEvents.getNextEvent(event);
-                String packageName = event.getPackageName();
-                long eventTime = event.getTimeStamp();
-                
-                // Skip events from before today
-                if (eventTime < startTime) {
-                    continue;
-                }
-                
-                // Skip our own app and system apps
-                if (packageName.equals(ourPackage) || isSystemAppStatic(context, packageName)) {
-                    continue;
-                }
-                
-                if (event.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND) {
-                    // Record the start time for this app
-                    lastForegroundTimes.put(packageName, eventTime);
-                    foregroundApps.add(packageName);
-                    
-                } else if (event.getEventType() == UsageEvents.Event.MOVE_TO_BACKGROUND) {
-                    // Calculate time spent for this app
-                    Long appStartTime = lastForegroundTimes.remove(packageName);
-                    if (appStartTime != null) {
-                        // Make sure we only count time after start of day
-                        long effectiveStartTime = Math.max(appStartTime, startTime);
-                        long timeSpent = eventTime - effectiveStartTime;
-                        if (timeSpent >= 1000 && timeSpent < 4 * 60 * 60 * 1000) {
-                            Long currentTotal = appUsageTimes.getOrDefault(packageName, 0L);
-                            appUsageTimes.put(packageName, currentTotal + timeSpent);
-                            Log.d(TAG, String.format("App session: %s - %.2f minutes", 
-                                getAppName(context, packageName), timeSpent / (60f * 1000f)));
-                        }
-                    }
-                    foregroundApps.remove(packageName);
-                }
-            }
-
-            // Handle still-active apps
-            for (String packageName : new HashSet<>(foregroundApps)) {
-                Long appStartTime = lastForegroundTimes.get(packageName);
-                if (appStartTime != null) {
-                    // Make sure we only count time after start of day
-                    long effectiveStartTime = Math.max(appStartTime, startTime);
-                    long timeSpent = endTime - effectiveStartTime;
-                    if (timeSpent >= 1000 && timeSpent < 4 * 60 * 60 * 1000) {
-                        Long currentTotal = appUsageTimes.getOrDefault(packageName, 0L);
-                        appUsageTimes.put(packageName, currentTotal + timeSpent);
-                        Log.d(TAG, String.format("Active app: %s - %.2f minutes", 
-                            getAppName(context, packageName), timeSpent / (60f * 1000f)));
-                    }
-                }
-            }
-
-            // Calculate total minutes
-            float totalMinutes = 0;
-            for (Map.Entry<String, Long> entry : appUsageTimes.entrySet()) {
-                float minutes = entry.getValue() / (60f * 1000f);
-                totalMinutes += minutes;
-                Log.d(TAG, String.format("%s: %.2f minutes", 
-                    getAppName(context, entry.getKey()), minutes));
-            }
-
-            // Store the calculated value with timestamp
-            SharedPreferences.Editor editor = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
-            editor.putFloat(KEY_TOTAL_SCREEN_TIME, totalMinutes);
-            editor.putLong(KEY_LAST_UPDATE, System.currentTimeMillis());
-            editor.apply();
-
-            Log.d(TAG, "Total screen time for today: " + totalMinutes + " minutes");
-            return totalMinutes;
-        } catch (Exception e) {
-            Log.e(TAG, "Error getting total screen time", e);
-            return getFallbackScreenTime(context);
-        }
-    }
-
-    private static String getAppName(Context context, String packageName) {
-        try {
-            PackageManager packageManager = context.getPackageManager();
-            ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, 0);
-            return packageManager.getApplicationLabel(appInfo).toString();
-        } catch (PackageManager.NameNotFoundException e) {
-            return packageName;
-        }
-    }
-
-    private static float getFallbackScreenTime(Context context) {
-        try {
-            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            float capacitorTime = prefs.getFloat("capacitorScreenTime", 0);
-            long lastCapacitorUpdate = prefs.getLong("lastCapacitorUpdate", 0);
-            
-            // Only use Capacitor time if it's from today
-            if (lastCapacitorUpdate > getStartOfDay()) {
-                Log.d(TAG, "Using Capacitor fallback time: " + capacitorTime);
-                return capacitorTime;
-            }
-            
-            // If no valid fallback, return stored screen time
-            return prefs.getFloat(KEY_TOTAL_SCREEN_TIME, 0);
-        } catch (Exception e) {
-            Log.e(TAG, "Error getting fallback screen time", e);
-            return 0;
-        }
-    }
-
-    /**
-     * Static method to check if an app is a system app
-     */
-    private static boolean isSystemAppStatic(Context context, String packageName) {
-        try {
-            PackageManager packageManager = context.getPackageManager();
-            ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, 0);
-            return (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
-        } catch (PackageManager.NameNotFoundException e) {
-            return false;
-        }
     }
 
     /**
@@ -2181,6 +2052,31 @@ public class AppUsageTracker extends Plugin {
             }
         } catch (Exception e) {
             Log.e(TAG, "Error checking screen time limit", e);
+        }
+    }
+
+    /**
+     * Get the start of the current day in milliseconds
+     */
+    private static long getStartOfDay() {
+        Calendar calendar = Calendar.getInstance();
+        calendar.set(Calendar.HOUR_OF_DAY, 0);
+        calendar.set(Calendar.MINUTE, 0);
+        calendar.set(Calendar.SECOND, 0);
+        calendar.set(Calendar.MILLISECOND, 0);
+        return calendar.getTimeInMillis();
+    }
+
+    /**
+     * Get the display name of an app from its package name
+     */
+    private static String getAppName(Context context, String packageName) {
+        try {
+            PackageManager packageManager = context.getPackageManager();
+            ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, 0);
+            return packageManager.getApplicationLabel(appInfo).toString();
+        } catch (PackageManager.NameNotFoundException e) {
+            return packageName;
         }
     }
 } 
