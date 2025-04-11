@@ -126,24 +126,33 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
         try {
             // Check debounce
             long currentTime = System.currentTimeMillis();
-            if (currentTime - lastUpdateTime < DEBOUNCE_TIME) {
+            /* if (currentTime - lastUpdateTime < DEBOUNCE_TIME) {
                 Log.d(TAG, "Skipping update due to debounce");
                 return;
-            }
+            } */
             lastUpdateTime = currentTime;
 
-            RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.screen_time_widget);
+            Log.d(TAG, "Creating RemoteViews with layout: widget_layout");
+            RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_layout);
             
             // Format screen time
             String timeText = formatTime(screenTime);
+            String limitText = formatTime(screenTimeLimit);
             
             // Calculate progress percentage (cap at 100%)
             int progress = Math.min(100, Math.round((screenTime / screenTimeLimit) * 100));
             
-            // Update views
-            views.setTextViewText(R.id.widget_title, "Screen Time");
-            views.setTextViewText(R.id.widget_screen_time, timeText);
-            views.setProgressBar(R.id.widget_progress, 100, progress, false);
+            Log.d(TAG, "Updating views with values - Time: " + timeText + ", Limit: " + limitText + ", Progress: " + progress);
+            
+            // Update views with detailed logging
+            Log.d(TAG, "Setting time_text to: " + "Used: " + timeText);
+            views.setTextViewText(R.id.time_text, "Used: " + timeText);
+            
+            Log.d(TAG, "Setting limit_text to: " + limitText);
+            views.setTextViewText(R.id.limit_text, limitText);
+            
+            Log.d(TAG, "Setting progress_bar to: " + progress);
+            views.setProgressBar(R.id.progress_bar, 100, progress, false);
             
             // Set up refresh button click
             Intent refreshIntent = new Intent(context, ScreenTimeWidgetProvider.class);
@@ -154,12 +163,17 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
             );
             
+            Log.d(TAG, "Setting refresh button click listener");
+            views.setOnClickPendingIntent(R.id.refresh_button, refreshPendingIntent);
+            
+            Log.d(TAG, "Calling updateAppWidget for widget ID: " + appWidgetId);
             // Update widget
             appWidgetManager.updateAppWidget(appWidgetId, views);
             
-            Log.d(TAG, String.format("Widget updated with values - Time: %.2f, Limit: %d", screenTime, screenTimeLimit));
+            Log.d(TAG, String.format("Widget update completed - Time: %.2f, Limit: %d", screenTime, screenTimeLimit));
         } catch (Exception e) {
             Log.e(TAG, "Error updating widget", e);
+            e.printStackTrace();
         }
     }
 
@@ -199,8 +213,29 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
                     break;
 
                 case "com.screentimereminder.app.APP_USAGE_UPDATE":
-                    // Handle usage update broadcast - always use native calculation
-                    onUpdate(context, appWidgetManager, appWidgetIds);
+                    // Handle usage update broadcast
+                    if (intent.hasExtra("usageData")) {
+                        try {
+                            String usageData = intent.getStringExtra("usageData");
+                            JSONObject data = new JSONObject(usageData);
+                            float totalScreenTime = (float) data.getDouble("totalScreenTime");
+                            int screenTimeLimit = data.getInt("screenTimeLimit");
+                            
+                            Log.d(TAG, "Updating widget with new data - Time: " + totalScreenTime + ", Limit: " + screenTimeLimit);
+                            
+                            // Update all widgets with the new data
+                            for (int appWidgetId : appWidgetIds) {
+                                updateWidget(context, appWidgetManager, appWidgetId, totalScreenTime, screenTimeLimit);
+                            }
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error parsing usage data", e);
+                            // Fall back to native calculation if parsing fails
+                            onUpdate(context, appWidgetManager, appWidgetIds);
+                        }
+                    } else {
+                        // If no usage data, use native calculation
+                        onUpdate(context, appWidgetManager, appWidgetIds);
+                    }
                     break;
 
                 default:

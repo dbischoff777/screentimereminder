@@ -93,11 +93,31 @@ public class AppUsageTracker extends Plugin {
                 return;
             }
             
-            screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-            notificationFrequency = prefs.getInt(KEY_NOTIFICATION_FREQUENCY, 5);
-            Log.d(TAG, "Loaded screen time limit: " + screenTimeLimit + " minutes");
+            // Handle both Integer and Long types for screen time limit
+            Object limitValue = prefs.getAll().get(KEY_SCREEN_TIME_LIMIT);
+            if (limitValue instanceof Integer) {
+                screenTimeLimit = ((Integer) limitValue).longValue();
+            } else if (limitValue instanceof Long) {
+                screenTimeLimit = (Long) limitValue;
+            } else {
+                screenTimeLimit = DEFAULT_SCREEN_TIME_LIMIT;
+            }
+            
+            // Handle both Integer and Long types for notification frequency
+            Object frequencyValue = prefs.getAll().get(KEY_NOTIFICATION_FREQUENCY);
+            if (frequencyValue instanceof Integer) {
+                notificationFrequency = (Integer) frequencyValue;
+            } else if (frequencyValue instanceof Long) {
+                notificationFrequency = ((Long) frequencyValue).intValue();
+            } else {
+                notificationFrequency = 5; // Default value
+            }
+            
+            Log.d(TAG, "Loaded screen time limit: " + screenTimeLimit + " minutes, notification frequency: " + notificationFrequency + " minutes");
         } catch (Exception e) {
             Log.e(TAG, "Error loading screen time limit", e);
+            screenTimeLimit = DEFAULT_SCREEN_TIME_LIMIT;
+            notificationFrequency = 5;
         }
     }
 
@@ -141,10 +161,14 @@ public class AppUsageTracker extends Plugin {
             // Load settings
             loadScreenTimeLimit();
             
-            // Register broadcast receiver
+            // Register broadcast receiver with proper flags for Android 13+
             IntentFilter filter = new IntentFilter();
             filter.addAction("com.screentimereminder.app.REFRESH_WIDGET");
-            context.registerReceiver(refreshReceiver, filter);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.registerReceiver(refreshReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                context.registerReceiver(refreshReceiver, filter);
+            }
             
             Log.d(TAG, "AppUsageTracker plugin loaded successfully");
         } catch (Exception e) {
