@@ -43,12 +43,12 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-    
-    // Disable lint checks that are causing issues
-    lintOptions {
+    lint {
         abortOnError false
         checkReleaseBuilds false
     }
+
+    // Disable lint checks that are causing issues
 }
 
 repositories {
