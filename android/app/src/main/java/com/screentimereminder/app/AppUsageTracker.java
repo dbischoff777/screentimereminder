@@ -1280,24 +1280,35 @@ public class AppUsageTracker extends Plugin {
         synchronized (settingsLock) {
             try {
                 int limitMinutes = call.getInt("limitMinutes", (int) DEFAULT_SCREEN_TIME_LIMIT);
-                String chainId = "SETTINGS_CHAIN_" + System.currentTimeMillis();
-                Log.d(TAG, String.format("[%s] User setting screen time limit to: %d minutes", chainId, limitMinutes));
+                String newChainId = "SETTINGS_CHAIN_" + System.currentTimeMillis();
+                String currentChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
                 
-                // Update settings through our synchronized method
-                updateSettings(chainId, limitMinutes, getNotificationFrequencyStatic(context));
+                Log.d(TAG, String.format("[%s] User setting screen time limit to: %d minutes", newChainId, limitMinutes));
+                Log.d(TAG, String.format("[%s] - Current chain ID: %s", newChainId, currentChainId));
+                Log.d(TAG, String.format("[%s] - Current screen time limit: %d minutes", newChainId, 
+                    prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT)));
                 
-                // Update widget immediately
-                Intent updateIntent = new Intent(getContext(), ScreenTimeWidgetProvider.class);
-                updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
-                int[] ids = AppWidgetManager.getInstance(getContext())
-                    .getAppWidgetIds(new ComponentName(getContext(), ScreenTimeWidgetProvider.class));
-                updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
-                updateIntent.putExtra("totalScreenTime", calculateScreenTime(getContext()));
-                updateIntent.putExtra("screenTimeLimit", limitMinutes);
-                getContext().sendBroadcast(updateIntent);
-                
-                Log.d(TAG, String.format("[%s] Widget updated with new screen time limit", chainId));
-                call.resolve();
+                // Only update if the new chain ID is newer than the current one
+                if (newChainId.compareTo(currentChainId) > 0) {
+                    // Update settings through our synchronized method
+                    updateSettings(newChainId, limitMinutes, getNotificationFrequencyStatic(context));
+                    
+                    // Update widget immediately
+                    Intent updateIntent = new Intent(getContext(), ScreenTimeWidgetProvider.class);
+                    updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
+                    int[] ids = AppWidgetManager.getInstance(getContext())
+                        .getAppWidgetIds(new ComponentName(getContext(), ScreenTimeWidgetProvider.class));
+                    updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+                    updateIntent.putExtra("totalScreenTime", calculateScreenTime(getContext()));
+                    updateIntent.putExtra("screenTimeLimit", limitMinutes);
+                    getContext().sendBroadcast(updateIntent);
+                    
+                    Log.d(TAG, String.format("[%s] Widget updated with new screen time limit", newChainId));
+                    call.resolve();
+                } else {
+                    Log.d(TAG, String.format("[%s] Skipping update - current chain ID (%s) is newer", newChainId, currentChainId));
+                    call.resolve();
+                }
             } catch (Exception e) {
                 Log.e(TAG, "Error setting screen time limit", e);
                 call.reject("Error setting screen time limit: " + e.getMessage());
@@ -2193,39 +2204,44 @@ public class AppUsageTracker extends Plugin {
         String currentChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
         String newChainId = "SETTINGS_CHAIN_" + System.currentTimeMillis();
         
-        Log.d(TAG, String.format("[%s] Updating settings:", newChainId));
-        Log.d(TAG, String.format("[%s] - Current chain ID: %s", newChainId, currentChainId));
-        Log.d(TAG, String.format("[%s] - New screen time limit: %d minutes", newChainId, screenTimeLimit));
-        Log.d(TAG, String.format("[%s] - New notification frequency: %d minutes", newChainId, notificationFrequency));
-        
-        SharedPreferences.Editor editor = prefs.edit();
-        editor.putLong(KEY_SCREEN_TIME_LIMIT, screenTimeLimit);
-        editor.putLong(KEY_NOTIFICATION_FREQUENCY, notificationFrequency);
-        editor.putString("lastSettingsChainId", newChainId);
-        editor.commit();
-        
-        // Verify the changes
-        long savedLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-        long savedFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L);
-        String savedChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
-        
-        Log.d(TAG, String.format("[%s] Settings synchronized - New values:", newChainId));
-        Log.d(TAG, String.format("[%s] - Screen time limit: %d minutes", newChainId, savedLimit));
-        Log.d(TAG, String.format("[%s] - Notification frequency: %d minutes", newChainId, savedFrequency));
-        Log.d(TAG, String.format("[%s] - Chain ID: %s", newChainId, savedChainId));
-        
-        // Broadcast the update
-        try {
-            Intent broadcastIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
-            JSONObject updateData = new JSONObject();
-            updateData.put("screenTimeLimit", screenTimeLimit);
-            updateData.put("notificationFrequency", notificationFrequency);
-            updateData.put("chainId", newChainId);
-            updateData.put("action", "UPDATE_SETTINGS");
-            broadcastIntent.putExtra("usageData", updateData.toString());
-            context.sendBroadcast(broadcastIntent);
-        } catch (JSONException e) {
-            Log.e(TAG, "Error creating broadcast data", e);
+        // Only update if the new chain ID is newer than the current one
+        if (newChainId.compareTo(currentChainId) > 0) {
+            Log.d(TAG, String.format("[%s] Updating settings:", newChainId));
+            Log.d(TAG, String.format("[%s] - Current chain ID: %s", newChainId, currentChainId));
+            Log.d(TAG, String.format("[%s] - New screen time limit: %d minutes", newChainId, screenTimeLimit));
+            Log.d(TAG, String.format("[%s] - New notification frequency: %d minutes", newChainId, notificationFrequency));
+            
+            SharedPreferences.Editor editor = prefs.edit();
+            editor.putLong(KEY_SCREEN_TIME_LIMIT, screenTimeLimit);
+            editor.putLong(KEY_NOTIFICATION_FREQUENCY, notificationFrequency);
+            editor.putString("lastSettingsChainId", newChainId);
+            editor.commit();
+            
+            // Verify the changes
+            long savedLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+            long savedFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L);
+            String savedChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
+            
+            Log.d(TAG, String.format("[%s] Settings synchronized - New values:", newChainId));
+            Log.d(TAG, String.format("[%s] - Screen time limit: %d minutes", newChainId, savedLimit));
+            Log.d(TAG, String.format("[%s] - Notification frequency: %d minutes", newChainId, savedFrequency));
+            Log.d(TAG, String.format("[%s] - Chain ID: %s", newChainId, savedChainId));
+            
+            // Broadcast the update
+            try {
+                Intent broadcastIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
+                JSONObject updateData = new JSONObject();
+                updateData.put("screenTimeLimit", screenTimeLimit);
+                updateData.put("notificationFrequency", notificationFrequency);
+                updateData.put("chainId", newChainId);
+                updateData.put("action", "UPDATE_SETTINGS");
+                broadcastIntent.putExtra("usageData", updateData.toString());
+                context.sendBroadcast(broadcastIntent);
+            } catch (JSONException e) {
+                Log.e(TAG, "Error creating broadcast data", e);
+            }
+        } else {
+            Log.d(TAG, String.format("[%s] Skipping update - current chain ID (%s) is newer", newChainId, currentChainId));
         }
     }
 } 
