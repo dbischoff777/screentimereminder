@@ -164,9 +164,27 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
             // Handle different actions
             switch (action) {
                 case ACTION_UPDATE_WIDGET:
-                case AppWidgetManager.ACTION_APPWIDGET_UPDATE:
-                    // Manual refresh or widget update
+                    // Manual refresh - use onUpdate to recalculate everything
                     onUpdate(context, appWidgetManager, appWidgetIds);
+                    break;
+                    
+                case AppWidgetManager.ACTION_APPWIDGET_UPDATE:
+                    // First check if we have screenTimeLimit in the intent
+                    if (intent.hasExtra("totalScreenTime") && intent.hasExtra("screenTimeLimit")) {
+                        float totalScreenTime = intent.getFloatExtra("totalScreenTime", 0);
+                        int screenTimeLimit = intent.getIntExtra("screenTimeLimit", (int)AppUsageTracker.DEFAULT_SCREEN_TIME_LIMIT);
+                        
+                        Log.d(TAG, "Updating widget with intent data - Time: " + totalScreenTime + ", Limit: " + screenTimeLimit);
+                        
+                        // Update all widgets with the provided data
+                        for (int appWidgetId : appWidgetIds) {
+                            updateWidget(context, appWidgetManager, appWidgetId, totalScreenTime, screenTimeLimit);
+                        }
+                    } else {
+                        // No specific data in intent, fall back to onUpdate
+                        Log.d(TAG, "No specific data in intent, falling back to onUpdate");
+                        onUpdate(context, appWidgetManager, appWidgetIds);
+                    }
                     break;
 
                 case "com.screentimereminder.app.APP_USAGE_UPDATE":

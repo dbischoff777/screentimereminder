@@ -310,14 +310,7 @@ public class BackgroundService extends Service {
             Log.d(TAG, String.format("[%s] Starting background service update - Current values:", chainId));
             Log.d(TAG, String.format("[%s] - Total screen time: %.2f minutes", chainId, totalTime));
 
-            // Update widget with latest values
-            Intent updateIntent = new Intent(this, ScreenTimeWidgetProvider.class);
-            updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
-            int[] ids = AppWidgetManager.getInstance(this)
-                .getAppWidgetIds(new ComponentName(this, ScreenTimeWidgetProvider.class));
-            updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
-            updateIntent.putExtra("totalScreenTime", totalTime);
-            sendBroadcast(updateIntent);
+            // Let AppUsageTracker handle widget updates (removed the direct widget update from here)
 
             Log.d(TAG, String.format("[%s] Completed background service update", chainId));
         } catch (Exception e) {
@@ -710,11 +703,10 @@ public class BackgroundService extends Service {
 
     private void checkScreenTimeLimit() {
         try {
+            // Defer entirely to AppUsageTracker
             float totalTime = AppUsageTracker.calculateScreenTime(this);
-            int currentLimit = AppUsageTracker.getScreenTimeLimitStatic(this);
-            int currentFrequency = AppUsageTracker.getNotificationFrequencyStatic(this);
-            
-            // Rest of the method remains the same
+            AppUsageTracker.checkScreenTimeLimitStatic(this, Math.round(totalTime), 
+                AppUsageTracker.getNotificationFrequencyStatic(this));
         } catch (Exception e) {
             Log.e(TAG, "Error checking screen time limit", e);
         }
