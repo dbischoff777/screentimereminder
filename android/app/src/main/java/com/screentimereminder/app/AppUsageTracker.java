@@ -65,6 +65,7 @@ public class AppUsageTracker extends Plugin {
     private static AppUsageTracker instance;
     private Context context;
     public static final long DEFAULT_SCREEN_TIME_LIMIT = 120L; // 2 hours in minutes
+    public static final long DEFAULT_NOTIFICATION_FREQUENCY = 5L; // 5 minutes
     private UsageStatsManager usageStatsManager;
     private ScheduledExecutorService scheduler;
     private String currentForegroundApp = "";
@@ -121,7 +122,7 @@ public class AppUsageTracker extends Plugin {
                 } else if (frequencyValue instanceof Long) {
                     notificationFrequency = (Long) frequencyValue;
                 } else {
-                    notificationFrequency = 5L;
+                    notificationFrequency = DEFAULT_NOTIFICATION_FREQUENCY;
                 }
                 
                 String chainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
@@ -156,7 +157,7 @@ public class AppUsageTracker extends Plugin {
                 if (prefs != null) {
                     SharedPreferences.Editor editor = prefs.edit();
                     editor.putLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-                    editor.putLong(KEY_NOTIFICATION_FREQUENCY, 5L);
+                    editor.putLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
                     editor.apply();
                 }
             }
@@ -1197,7 +1198,7 @@ public class AppUsageTracker extends Plugin {
                     
                     // Get current values before making changes
                     long currentLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-                    long currentFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L);
+                    long currentFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
                     String currentChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
                     
                     Log.d(TAG, String.format("[%s] Processing settings update:", chainId));
@@ -1234,7 +1235,7 @@ public class AppUsageTracker extends Plugin {
                         
                         // Verify the changes
                         long savedLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-                        long savedFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L);
+                        long savedFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
                         String savedChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
                         
                         Log.d(TAG, String.format("[%s] Settings synchronized - New values:", chainId));
@@ -1290,8 +1291,11 @@ public class AppUsageTracker extends Plugin {
                 
                 // Only update if the new chain ID is newer than the current one
                 if (newChainId.compareTo(currentChainId) > 0) {
+                    // Get current notification frequency
+                    long currentFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
+                    
                     // Update settings through our synchronized method
-                    updateSettings(newChainId, limitMinutes, getNotificationFrequencyStatic(context));
+                    updateSettings(newChainId, limitMinutes, currentFrequency);
                     
                     // Update widget immediately
                     Intent updateIntent = new Intent(getContext(), ScreenTimeWidgetProvider.class);
@@ -1304,6 +1308,11 @@ public class AppUsageTracker extends Plugin {
                     getContext().sendBroadcast(updateIntent);
                     
                     Log.d(TAG, String.format("[%s] Widget updated with new screen time limit", newChainId));
+                    
+                    // Verify the save
+                    long savedLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+                    Log.d(TAG, String.format("[%s] Verified saved screen time limit: %d minutes", newChainId, savedLimit));
+                    
                     call.resolve();
                 } else {
                     Log.d(TAG, String.format("[%s] Skipping update - current chain ID (%s) is newer", newChainId, currentChainId));
@@ -1320,24 +1329,44 @@ public class AppUsageTracker extends Plugin {
     public void setNotificationFrequency(PluginCall call) {
         synchronized (settingsLock) {
             try {
-                if (!call.hasOption("frequency")) {
-                    Log.e(TAG, "Missing required parameter: frequency");
-                    call.reject("Missing required parameter: frequency");
-                    return;
+                int frequencyMinutes = call.getInt("frequencyMinutes", (int) DEFAULT_NOTIFICATION_FREQUENCY);
+                String newChainId = "SETTINGS_CHAIN_" + System.currentTimeMillis();
+                String currentChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
+                
+                Log.d(TAG, String.format("[%s] User setting notification frequency to: %d minutes", newChainId, frequencyMinutes));
+                Log.d(TAG, String.format("[%s] - Current chain ID: %s", newChainId, currentChainId));
+                Log.d(TAG, String.format("[%s] - Current notification frequency: %d minutes", newChainId, 
+                    prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY)));
+                
+                // Only update if the new chain ID is newer than the current one
+                if (newChainId.compareTo(currentChainId) > 0) {
+                    // Get current screen time limit
+                    long currentLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+                    
+                    // Update settings through our synchronized method
+                    updateSettings(newChainId, currentLimit, frequencyMinutes);
+                    
+                    // Update widget immediately
+                    Intent updateIntent = new Intent(getContext(), ScreenTimeWidgetProvider.class);
+                    updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
+                    int[] ids = AppWidgetManager.getInstance(getContext())
+                        .getAppWidgetIds(new ComponentName(getContext(), ScreenTimeWidgetProvider.class));
+                    updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+                    updateIntent.putExtra("totalScreenTime", calculateScreenTime(getContext()));
+                    updateIntent.putExtra("screenTimeLimit", currentLimit);
+                    getContext().sendBroadcast(updateIntent);
+                    
+                    Log.d(TAG, String.format("[%s] Widget updated with new notification frequency", newChainId));
+                    
+                    // Verify the save
+                    long savedFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
+                    Log.d(TAG, String.format("[%s] Verified saved notification frequency: %d minutes", newChainId, savedFrequency));
+                    
+                    call.resolve();
+                } else {
+                    Log.d(TAG, String.format("[%s] Skipping update - current chain ID (%s) is newer", newChainId, currentChainId));
+                    call.resolve();
                 }
-
-                int frequencyMinutes = call.getInt("frequency", 5);
-                String chainId = "SETTINGS_CHAIN_" + System.currentTimeMillis();
-                Log.d(TAG, String.format("[%s] User setting notification frequency - Raw value from call data: %d minutes", chainId, frequencyMinutes));
-                
-                // Update settings through our synchronized method
-                updateSettings(chainId, getScreenTimeLimitStatic(context), frequencyMinutes);
-                
-                // Verify the save
-                long savedFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L);
-                Log.d(TAG, String.format("[%s] Verified saved frequency: %d minutes", chainId, savedFrequency));
-                
-                call.resolve();
             } catch (Exception e) {
                 Log.e(TAG, "Error setting notification frequency", e);
                 call.reject("Error setting notification frequency: " + e.getMessage());
@@ -1442,7 +1471,7 @@ public class AppUsageTracker extends Plugin {
             long currentTime = System.currentTimeMillis();
             
             // Get notification frequency from settings (in minutes)
-            long notificationFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L);
+            long notificationFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
             long NOTIFICATION_COOLDOWN = notificationFrequency * 60 * 1000;
             
             // Check if we need to show notifications
@@ -1924,7 +1953,7 @@ public class AppUsageTracker extends Plugin {
      */
     public static synchronized int getNotificationFrequencyStatic(Context context) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-        return (int) prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L);
+        return (int) prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
     }
 
     /**
@@ -1958,7 +1987,7 @@ public class AppUsageTracker extends Plugin {
                 Log.d(TAG, String.format("[%s] Reading settings from SharedPreferences:", chainId));
                 Log.d(TAG, String.format("[%s] - Raw screen time limit from prefs: %d minutes", chainId, screenTimeLimit));
                 Log.d(TAG, String.format("[%s] - Raw notification frequency from prefs: %d minutes", chainId, 
-                    prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L)));
+                    prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY)));
                 Log.d(TAG, String.format("[%s] - Last settings chain ID: %s", chainId, chainId));
             }
             
@@ -2077,7 +2106,7 @@ public class AppUsageTracker extends Plugin {
                 // First read current values
                 String currentChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
                 long currentLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-                long currentFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L);
+                long currentFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
                 
                 Log.d(TAG, String.format("[%s] Current settings before update:", chainId));
                 Log.d(TAG, String.format("[%s] - Current chain ID: %s", chainId, currentChainId));
@@ -2099,7 +2128,7 @@ public class AppUsageTracker extends Plugin {
                     
                     // Verify the changes
                     long savedLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-                    long savedFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L);
+                    long savedFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
                     String savedChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
                     
                     Log.d(TAG, String.format("[%s] Settings updated - New values:", chainId));
@@ -2121,7 +2150,28 @@ public class AppUsageTracker extends Plugin {
                     Log.d(TAG, String.format("[%s] - Screen time limit: %d minutes", chainId, screenTimeLimit));
                     Log.d(TAG, String.format("[%s] - Notification frequency: %d minutes", chainId, notificationFrequency));
                     
-                    context.sendBroadcast(broadcastIntent);
+                    // Send broadcast with high priority to ensure immediate delivery
+                    context.sendOrderedBroadcast(broadcastIntent, null);
+                    
+                    // Force an immediate check with new settings
+                    float totalTime = calculateScreenTime(context);
+                    checkScreenTimeLimitStatic(context, Math.round(totalTime), (int)notificationFrequency);
+                    
+                    // Update widget with new values
+                    Intent updateIntent = new Intent(context, ScreenTimeWidgetProvider.class);
+                    updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
+                    int[] ids = AppWidgetManager.getInstance(context)
+                        .getAppWidgetIds(new ComponentName(context, ScreenTimeWidgetProvider.class));
+                    updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+                    updateIntent.putExtra("totalScreenTime", totalTime);
+                    updateIntent.putExtra("screenTimeLimit", screenTimeLimit);
+                    context.sendBroadcast(updateIntent);
+                    
+                    // Notify web listeners
+                    JSObject ret = new JSObject();
+                    ret.put("screenTimeLimit", screenTimeLimit);
+                    ret.put("notificationFrequency", notificationFrequency);
+                    notifyListeners("settingsUpdated", ret);
                 } else {
                     Log.d(TAG, String.format("[%s] Skipping update - current chain ID (%s) is newer", 
                         chainId, currentChainId));
@@ -2150,7 +2200,7 @@ public class AppUsageTracker extends Plugin {
                 
                 if (shouldUpdate) {
                     long newLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-                    long newFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L);
+                    long newFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
                     
                     // Update settings based on the action
                     if ("UPDATE_LIMIT".equals(action) && data.has("screenTimeLimit")) {
@@ -2219,7 +2269,7 @@ public class AppUsageTracker extends Plugin {
             
             // Verify the changes
             long savedLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-            long savedFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, 5L);
+            long savedFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
             String savedChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
             
             Log.d(TAG, String.format("[%s] Settings synchronized - New values:", newChainId));
