@@ -1252,11 +1252,43 @@ const DetailedAnalytics = () => {
               Report Settings
             </Title>
             
-            <EmailReportSettings onSave={handleEmailSettingsSave} />
+            <Paper
+              style={{
+                background: 'rgba(0, 0, 32, 0.5)',
+                padding: '1.5rem',
+                borderRadius: '8px',
+                border: '1px solid rgba(255, 0, 255, 0.1)',
+                marginBottom: '1.5rem',
+              }}
+            >
+              <Text size="sm" style={{ 
+                color: '#FFFFFF', 
+                marginBottom: '1.5rem',
+                lineHeight: 1.6
+              }}>
+                Configure when and how you receive screen time reports. These reports include detailed analytics 
+                about your app usage patterns and productivity metrics.
+              </Text>
+              
+              <EmailReportSettings onSave={handleEmailSettingsSave} />
+            </Paper>
             
-            <Text size="sm" style={{ color: '#AAAAAA', marginTop: '1rem' }}>
-              Configure your screen time report delivery preferences. Reports include detailed analytics about your app usage and productivity metrics.
-            </Text>
+            <Card
+              style={{
+                background: 'rgba(0, 0, 32, 0.3)',
+                borderRadius: '8px',
+                padding: '1rem',
+                marginTop: '1rem',
+                border: '1px solid rgba(0, 255, 255, 0.1)',
+              }}
+            >
+              <Group align="center" style={{ color: '#AAAAAA' }}>
+                <span role="img" aria-label="info" style={{ fontSize: '1.2rem', marginRight: '0.5rem' }}>ℹ️</span>
+                <Text size="sm">
+                  Reports are sent securely via email and contain no personally identifiable information beyond your app usage data.
+                </Text>
+              </Group>
+            </Card>
           </div>
         </Tabs.Panel>
       </Tabs>

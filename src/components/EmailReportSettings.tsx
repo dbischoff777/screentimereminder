@@ -78,13 +78,17 @@ const CustomDropdown = ({
   const selectedOption = options.find(opt => opt.value === value);
   
   const dropdownClass = openUpward ? "position-top" : "position-bottom";
+  
+  // Generate unique ID for accessibility
+  const dropdownId = `dropdown-${label.toLowerCase().replace(/\s+/g, '-')}`;
 
   return (
     <div className="dropdown-wrapper" style={{ marginBottom: '1rem' }} ref={dropdownRef}>
       <Text style={{ 
-        color: '#AAAAAA', 
-        marginBottom: '0.5rem', 
+        color: '#FFFFFF', 
+        marginBottom: '8px', 
         fontSize: '0.9rem',
+        fontWeight: 500,
         textAlign: 'left'
       }}>
         {label}
@@ -93,22 +97,47 @@ const CustomDropdown = ({
       <div 
         ref={toggleRef}
         onClick={() => setIsOpen(!isOpen)}
+        role="combobox"
+        aria-expanded={isOpen}
+        aria-haspopup="listbox"
+        aria-controls={dropdownId}
+        aria-label={`Select ${label}`}
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setIsOpen(!isOpen);
+          } else if (e.key === 'Escape' && isOpen) {
+            setIsOpen(false);
+          }
+        }}
         className={`dropdown-toggle ${isOpen ? 'dropdown-toggle-open' : ''}`}
         style={{
           backgroundColor: 'rgba(0, 0, 32, 0.5)',
           color: '#FFFFFF',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
-          fontSize: '1.2rem',
-          textAlign: 'center',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          fontSize: '1rem',
+          textAlign: 'left',
           cursor: 'pointer',
-          padding: '8px 16px',
+          padding: '12px 16px',
           borderRadius: '4px',
           width: '100%',
-          boxShadow: '0 0 10px rgba(0, 255, 255, 0.1)',
+          boxShadow: isOpen ? '0 0 10px rgba(0, 255, 255, 0.2)' : 'none',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          transition: 'all 0.3s ease'
+          transition: 'all 0.3s ease',
+          outline: 'none'
+        }}
+        onFocus={(e) => {
+          e.currentTarget.style.borderColor = '#00FFFF';
+          e.currentTarget.style.boxShadow = '0 0 0 2px rgba(0, 255, 255, 0.2)';
+        }}
+        onBlur={(e) => {
+          if (!isOpen) {
+            e.currentTarget.style.boxShadow = 'none';
+            e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+          }
         }}
       >
         <span>{selectedOption?.label}</span>
@@ -119,11 +148,15 @@ const CustomDropdown = ({
             transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
             transition: 'transform 0.3s ease'
           }} 
+          aria-hidden="true"
         />
       </div>
       
       {isOpen && (
         <div 
+          id={dropdownId}
+          role="listbox"
+          aria-label={`${label} options`}
           className={`custom-dropdown-menu ${dropdownClass}`}
           style={{
             position: 'fixed',
@@ -140,19 +173,51 @@ const CustomDropdown = ({
           {options.map(option => (
             <div
               key={option.value}
+              role="option"
+              aria-selected={option.value === value}
+              tabIndex={0}
               className="custom-dropdown-option"
               onClick={() => {
                 onChange(option.value);
                 setIsOpen(false);
               }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onChange(option.value);
+                  setIsOpen(false);
+                }
+              }}
               style={{
-                padding: '10px 16px',
+                padding: '12px 16px',
                 cursor: 'pointer',
                 backgroundColor: option.value === value ? 'rgba(0, 255, 255, 0.2)' : 'transparent',
                 color: option.value === value ? '#00FFFF' : '#FFFFFF',
                 borderLeft: option.value === value ? '3px solid #00FFFF' : 'none',
-                textAlign: 'center',
-                fontWeight: option.value === value ? 'bold' : 'normal'
+                textAlign: 'left',
+                fontWeight: option.value === value ? 'bold' : 'normal',
+                outline: 'none',
+                transition: 'background-color 0.2s ease'
+              }}
+              onMouseOver={(e) => {
+                if (option.value !== value) {
+                  e.currentTarget.style.backgroundColor = 'rgba(0, 255, 255, 0.1)';
+                }
+              }}
+              onMouseOut={(e) => {
+                if (option.value !== value) {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }
+              }}
+              onFocus={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(0, 255, 255, 0.1)';
+                e.currentTarget.style.outline = '2px solid #00FFFF';
+              }}
+              onBlur={(e) => {
+                if (option.value !== value) {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }
+                e.currentTarget.style.outline = 'none';
               }}
             >
               {option.label}
@@ -253,22 +318,34 @@ export function EmailReportSettings({ onSave }: EmailReportSettingsProps) {
   };
 
   return (
-    <Stack gap="md">
+    <Stack gap="lg">
       <TextInput
         label="Email Address"
         placeholder="Enter your email"
         value={email}
         onChange={(event) => setEmail(event.currentTarget.value)}
         error={email && !validateEmail(email) ? 'Please enter a valid email address' : null}
+        aria-required="true"
         styles={{
-          label: { color: '#c4c4c4' },
+          label: { 
+            color: '#FFFFFF',
+            fontWeight: 500,
+            marginBottom: '8px'
+          },
           input: {
-            backgroundColor: '#1a1b1e',
-            color: '#c4c4c4',
-            border: '1px solid #373A40',
+            backgroundColor: 'rgba(0, 0, 32, 0.5)',
+            color: '#FFFFFF',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+            borderRadius: '4px',
+            padding: '12px 16px',
+            fontSize: '1rem',
             '&:focus': {
-              borderColor: '#4DABF7'
+              borderColor: '#00FFFF',
+              boxShadow: '0 0 0 2px rgba(0, 255, 255, 0.2)'
             }
+          },
+          error: {
+            color: '#ff6b6b'
           }
         }}
       />
@@ -289,14 +366,23 @@ export function EmailReportSettings({ onSave }: EmailReportSettingsProps) {
         type="time"
         value={preferredTime}
         onChange={(e) => setPreferredTime(e.target.value)}
+        aria-label="Select preferred time for reports"
         styles={{
-          label: { color: '#c4c4c4' },
+          label: { 
+            color: '#FFFFFF',
+            fontWeight: 500,
+            marginBottom: '8px'
+          },
           input: {
             backgroundColor: 'rgba(0, 0, 32, 0.5)',
             color: '#FFFFFF',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+            borderRadius: '4px',
+            padding: '12px 16px',
+            fontSize: '1rem',
             '&:focus': {
-              borderColor: '#00FFFF'
+              borderColor: '#00FFFF',
+              boxShadow: '0 0 0 2px rgba(0, 255, 255, 0.2)'
             }
           }
         }}
@@ -331,50 +417,72 @@ export function EmailReportSettings({ onSave }: EmailReportSettingsProps) {
         />
       )}
 
-      <Stack gap="sm">
-        <div style={{ display: 'flex', gap: '1rem' }}>
-          <Button
-            onClick={handleSave}
-            loading={isSaving}
-            disabled={!email || !validateEmail(email) || isSaving}
-            styles={{
-              root: {
-                backgroundColor: '#4DABF7',
-                '&:hover': {
-                  backgroundColor: '#228BE6'
-                },
-                '&:disabled': {
-                  backgroundColor: '#373A40',
-                  color: '#909296'
-                }
+      <div style={{ 
+        display: 'flex', 
+        gap: '1rem', 
+        marginTop: '1rem', 
+        flexWrap: 'wrap',
+        justifyContent: 'flex-start' 
+      }}>
+        <Button
+          onClick={handleSave}
+          loading={isSaving}
+          disabled={!email || !validateEmail(email) || isSaving}
+          aria-label="Save email report settings"
+          styles={{
+            root: {
+              backgroundColor: '#4DABF7',
+              fontSize: '1rem',
+              padding: '10px 20px',
+              fontWeight: 500,
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                backgroundColor: '#228BE6',
+                transform: 'translateY(-2px)'
+              },
+              '&:active': {
+                transform: 'translateY(0)'
+              },
+              '&:disabled': {
+                backgroundColor: '#373A40',
+                color: '#909296'
               }
-            }}
-          >
-            {isSaving ? 'Saving...' : 'Save Settings'}
-          </Button>
-          
-          <Button
-            onClick={handleSendNow}
-            loading={isSending}
-            disabled={!email || !validateEmail(email) || isSending}
-            leftSection={<FiSend size={16} />}
-            styles={{
-              root: {
-                backgroundColor: '#20c997',
-                '&:hover': {
-                  backgroundColor: '#12b886'
-                },
-                '&:disabled': {
-                  backgroundColor: '#373A40',
-                  color: '#909296'
-                }
+            }
+          }}
+        >
+          {isSaving ? 'Saving...' : 'Save Settings'}
+        </Button>
+        
+        <Button
+          onClick={handleSendNow}
+          loading={isSending}
+          disabled={!email || !validateEmail(email) || isSending}
+          leftSection={<FiSend size={16} />}
+          aria-label="Send report immediately"
+          styles={{
+            root: {
+              backgroundColor: '#20c997',
+              fontSize: '1rem',
+              padding: '10px 20px',
+              fontWeight: 500,
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                backgroundColor: '#12b886',
+                transform: 'translateY(-2px)'
+              },
+              '&:active': {
+                transform: 'translateY(0)'
+              },
+              '&:disabled': {
+                backgroundColor: '#373A40',
+                color: '#909296'
               }
-            }}
-          >
-            {isSending ? 'Sending...' : 'Send Now'}
-          </Button>
-        </div>
-      </Stack>
+            }
+          }}
+        >
+          {isSending ? 'Sending...' : 'Send Now'}
+        </Button>
+      </div>
     </Stack>
   );
 } 
