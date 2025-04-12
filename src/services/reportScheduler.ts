@@ -9,11 +9,9 @@ interface ScheduledReport {
 
 export class ReportScheduler {
   private static instance: ReportScheduler;
-  private scheduledReports: Map<string, ScheduledReport>;
+  private scheduledReports: Map<string, ScheduledReport> = new Map();
 
-  private constructor() {
-    this.scheduledReports = new Map();
-  }
+  private constructor() {}
 
   public static getInstance(): ReportScheduler {
     if (!ReportScheduler.instance) {
@@ -66,7 +64,7 @@ export class ReportScheduler {
   private calculateProductivityScore(appUsageData: AppUsageData[]): number {
     if (appUsageData.length === 0) return 0;
 
-    const categoryScores = {
+    const categoryScores: Record<string, number> = {
       'Productivity': 1,
       'Education': 1,
       'Communication': 0.5,
@@ -80,12 +78,96 @@ export class ReportScheduler {
     let totalTime = 0;
 
     appUsageData.forEach(app => {
-      const score = categoryScores[app.category as keyof typeof categoryScores] || 0;
+      const category = app.category || 'Other';
+      const score = categoryScores[category as keyof typeof categoryScores] || 0;
       totalScore += score * app.time;
       totalTime += app.time;
     });
 
     return totalTime > 0 ? Math.round((totalScore / totalTime) * 100) : 0;
+  }
+
+  // Process app usage data to enrich it with additional information needed for detailed reports
+  private processAppUsageData(appUsageData: AppUsageData[]): AppUsageData[] {
+    // Ensure each app has a category
+    return appUsageData.map(app => {
+      // If app already has a category, keep it; otherwise, categorize it
+      if (!app.category) {
+        app.category = this.categorizeApp(app.name);
+      }
+      
+      // Ensure each app has a color based on its category
+      if (!app.color) {
+        app.color = this.getCategoryColor(app.category);
+      }
+      
+      return app;
+    });
+  }
+  
+  // Assign a category to an app based on its name
+  private categorizeApp(appName: string): string {
+    const lowerCaseName = appName.toLowerCase();
+    
+    if (lowerCaseName.includes('instagram') || 
+        lowerCaseName.includes('facebook') || 
+        lowerCaseName.includes('twitter') || 
+        lowerCaseName.includes('tiktok') || 
+        lowerCaseName.includes('snapchat') || 
+        lowerCaseName.includes('messenger')) {
+      return 'Social Media';
+    } else if (lowerCaseName.includes('youtube') || 
+               lowerCaseName.includes('netflix') || 
+               lowerCaseName.includes('spotify') || 
+               lowerCaseName.includes('music') || 
+               lowerCaseName.includes('video') || 
+               lowerCaseName.includes('player') || 
+               lowerCaseName.includes('movie')) {
+      return 'Entertainment';
+    } else if (lowerCaseName.includes('chrome') || 
+               lowerCaseName.includes('browser') || 
+               lowerCaseName.includes('gmail') || 
+               lowerCaseName.includes('outlook') || 
+               lowerCaseName.includes('office') || 
+               lowerCaseName.includes('word') || 
+               lowerCaseName.includes('excel') || 
+               lowerCaseName.includes('docs')) {
+      return 'Productivity';
+    } else if (lowerCaseName.includes('game') || 
+               lowerCaseName.includes('minecraft') || 
+               lowerCaseName.includes('fortnite') || 
+               lowerCaseName.includes('roblox')) {
+      return 'Games';
+    } else if (lowerCaseName.includes('duolingo') || 
+               lowerCaseName.includes('khan') || 
+               lowerCaseName.includes('learn') || 
+               lowerCaseName.includes('study') || 
+               lowerCaseName.includes('education')) {
+      return 'Education';
+    } else if (lowerCaseName.includes('whatsapp') || 
+               lowerCaseName.includes('telegram') || 
+               lowerCaseName.includes('signal') || 
+               lowerCaseName.includes('chat') || 
+               lowerCaseName.includes('mail')) {
+      return 'Communication';
+    } else {
+      return 'Other';
+    }
+  }
+  
+  // Get color based on category for visualization
+  private getCategoryColor(category: string): string {
+    const categoryColors: Record<string, string> = {
+      'Social Media': '#FF1493',    // Deep Pink
+      'Entertainment': '#FFD700',   // Gold
+      'Productivity': '#00FF00',    // Lime Green
+      'Games': '#00FFFF',           // Cyan
+      'Education': '#4169E1',       // Royal Blue
+      'Communication': '#9932CC',   // Dark Orchid
+      'Other': '#FF4500'            // Orange Red
+    };
+    
+    return categoryColors[category as keyof typeof categoryColors] || '#FFFFFF';
   }
 
   private sendReport(
@@ -95,8 +177,12 @@ export class ReportScheduler {
     productivityScore: number
   ): void {
     try {
+      // Process app data to enrich it
+      const processedData = this.processAppUsageData(appUsageData);
+      
+      // Send the report with processed data
       sendEmailReport(
-        appUsageData,
+        processedData,
         totalScreenTime,
         productivityScore,
         settings.email,
@@ -112,11 +198,13 @@ export class ReportScheduler {
   }
 
   public sendImmediateReport(email: string, appUsageData: AppUsageData[]): void {
-    const totalScreenTime = this.calculateTotalScreenTime(appUsageData);
-    const productivityScore = this.calculateProductivityScore(appUsageData);
+    // Process app data to enrich it
+    const processedData = this.processAppUsageData(appUsageData);
+    const totalScreenTime = this.calculateTotalScreenTime(processedData);
+    const productivityScore = this.calculateProductivityScore(processedData);
 
     sendEmailReport(
-      appUsageData,
+      processedData,
       totalScreenTime,
       productivityScore,
       email,
