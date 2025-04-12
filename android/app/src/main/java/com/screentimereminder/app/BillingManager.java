@@ -51,6 +51,8 @@ public class BillingManager extends Plugin {
                 if (billingResult.getResponseCode() == BillingClient.BillingResponseCode.OK) {
                     Log.d(TAG, "Billing client connected");
                     queryPurchases();
+                } else {
+                    Log.e(TAG, "Billing setup failed: " + billingResult.getResponseCode() + " - " + billingResult.getDebugMessage());
                 }
             }
 
@@ -68,23 +70,51 @@ public class BillingManager extends Plugin {
         executorService.execute(() -> {
             try {
                 List<QueryProductDetailsParams.Product> productList = new ArrayList<>();
+                
+                // Add all products to the query list
                 productList.add(QueryProductDetailsParams.Product.newBuilder()
                     .setProductId(HEATMAP_TAB_ID)
                     .setProductType(BillingClient.ProductType.INAPP)
                     .build());
-                // Add other products...
+                productList.add(QueryProductDetailsParams.Product.newBuilder()
+                    .setProductId(TIMELINE_TAB_ID)
+                    .setProductType(BillingClient.ProductType.INAPP)
+                    .build());
+                productList.add(QueryProductDetailsParams.Product.newBuilder()
+                    .setProductId(INSIGHTS_TAB_ID)
+                    .setProductType(BillingClient.ProductType.INAPP)
+                    .build());
+                productList.add(QueryProductDetailsParams.Product.newBuilder()
+                    .setProductId(DETAILS_TAB_ID)
+                    .setProductType(BillingClient.ProductType.INAPP)
+                    .build());
+                productList.add(QueryProductDetailsParams.Product.newBuilder()
+                    .setProductId(FOCUS_TAB_ID)
+                    .setProductType(BillingClient.ProductType.INAPP)
+                    .build());
+                productList.add(QueryProductDetailsParams.Product.newBuilder()
+                    .setProductId(ALL_TABS_ID)
+                    .setProductType(BillingClient.ProductType.INAPP)
+                    .build());
+
+                Log.d(TAG, "Querying for " + productList.size() + " products");
 
                 QueryProductDetailsParams params = QueryProductDetailsParams.newBuilder()
                     .setProductList(productList)
                     .build();
 
                 billingClient.queryProductDetailsAsync(params, (billingResult, productDetailsList) -> {
+                    Log.d(TAG, "Product query response code: " + billingResult.getResponseCode());
+                    Log.d(TAG, "Product query debug message: " + billingResult.getDebugMessage());
+                    Log.d(TAG, "Found " + (productDetailsList != null ? productDetailsList.size() : 0) + " products");
+                    
                     if (billingResult.getResponseCode() == BillingClient.BillingResponseCode.OK) {
                         JSObject ret = new JSObject();
                         JSONArray products = new JSONArray();
                         
                         for (ProductDetails details : productDetailsList) {
                             try {
+                                Log.d(TAG, "Product details: " + details.getProductId());
                                 JSONObject product = new JSONObject();
                                 product.put("id", details.getProductId());
                                 product.put("title", details.getTitle());
@@ -99,7 +129,7 @@ public class BillingManager extends Plugin {
                         ret.put("products", products.toString());
                         call.resolve(ret);
                     } else {
-                        call.reject("Failed to get products");
+                        call.reject("Failed to get products: " + billingResult.getDebugMessage());
                     }
                 });
             } catch (Exception e) {
@@ -117,9 +147,12 @@ public class BillingManager extends Plugin {
         }
 
         String productId = call.getString("productId");
+        Log.d(TAG, "Attempting to purchase product: " + productId);
+        
         Activity activity = getActivity();
         
         if (activity == null) {
+            Log.e(TAG, "Activity is null, cannot launch purchase flow");
             call.reject("Activity not available");
             return;
         }
@@ -135,9 +168,15 @@ public class BillingManager extends Plugin {
                     ))
                     .build();
 
+                Log.d(TAG, "Querying product details for purchase: " + productId);
                 billingClient.queryProductDetailsAsync(params, (billingResult, productDetailsList) -> {
+                    Log.d(TAG, "Product details query response code: " + billingResult.getResponseCode());
+                    Log.d(TAG, "Product details query debug message: " + billingResult.getDebugMessage());
+                    Log.d(TAG, "Found " + (productDetailsList != null ? productDetailsList.size() : 0) + " products for purchase");
+                    
                     if (billingResult.getResponseCode() == BillingClient.BillingResponseCode.OK && !productDetailsList.isEmpty()) {
                         ProductDetails productDetails = productDetailsList.get(0);
+                        Log.d(TAG, "Launching billing flow for: " + productDetails.getProductId());
                         
                         BillingFlowParams flowParams = BillingFlowParams.newBuilder()
                             .setProductDetailsParamsList(List.of(
@@ -147,10 +186,13 @@ public class BillingManager extends Plugin {
                             ))
                             .build();
 
-                        billingClient.launchBillingFlow(activity, flowParams);
+                        BillingResult result = billingClient.launchBillingFlow(activity, flowParams);
+                        Log.d(TAG, "Billing flow launch result: " + result.getResponseCode() + " - " + result.getDebugMessage());
+                        
                         call.resolve();
                     } else {
-                        call.reject("Product not found");
+                        Log.e(TAG, "Product not found or billing result not OK: " + productId);
+                        call.reject("Product not found: " + productId);
                     }
                 });
             } catch (Exception e) {
@@ -208,6 +250,7 @@ public class BillingManager extends Plugin {
     @PluginMethod
     public void checkPurchases(PluginCall call) {
         try {
+            Log.d(TAG, "Checking purchases");
             JSObject ret = new JSObject();
             JSONObject purchases = new JSONObject();
             
@@ -226,6 +269,7 @@ public class BillingManager extends Plugin {
                     .getSharedPreferences("purchases", Context.MODE_PRIVATE)
                     .getBoolean(productId, false);
                 purchases.put(productId, isPurchased);
+                Log.d(TAG, "Product " + productId + " purchased: " + isPurchased);
             }
             
             ret.put("purchases", purchases.toString());
@@ -239,11 +283,16 @@ public class BillingManager extends Plugin {
     private void queryPurchases() {
         executorService.execute(() -> {
             try {
+                Log.d(TAG, "Querying existing purchases");
                 billingClient.queryPurchasesAsync(
                     QueryPurchasesParams.newBuilder()
                         .setProductType(BillingClient.ProductType.INAPP)
                         .build(),
-                    this::handlePurchases
+                    (billingResult, purchasesList) -> {
+                        Log.d(TAG, "Purchase query result: " + billingResult.getResponseCode() + " - " + billingResult.getDebugMessage());
+                        Log.d(TAG, "Found " + (purchasesList != null ? purchasesList.size() : 0) + " existing purchases");
+                        handlePurchases(billingResult, purchasesList);
+                    }
                 );
             } catch (Exception e) {
                 Log.e(TAG, "Error querying purchases", e);

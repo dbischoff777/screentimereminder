@@ -7,6 +7,9 @@ import { ReportScheduler } from '../services/reportScheduler';
 import { notifications } from '@mantine/notifications';
 import { usePurchases } from '../hooks/usePurchases';
 
+// Import testing mode constant for development
+const TESTING_MODE = false; // Should match the value in usePurchases.ts
+
 const DetailedAnalytics = () => {
   const { 
     appUsageData, 
@@ -18,6 +21,7 @@ const DetailedAnalytics = () => {
   const [activeTab, setActiveTab] = useState<string | null>('heatmap');
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
   const [selectedTab, setSelectedTab] = useState<string | null>(null);
+  const [cornerTapCount, setCornerTapCount] = useState(0);
 
   // Add focus session tracking
   const [focusSessions, setFocusSessions] = useState<{
@@ -25,6 +29,24 @@ const DetailedAnalytics = () => {
     duration: number;
     timestamp: Date;
   }[]>([]);
+
+  // Handler for the hidden corner tap
+  const handleCornerTap = () => {
+    const newCount = cornerTapCount + 1;
+    console.log('PURCHASE-DEBUG: Corner tap count:', newCount);
+    
+    if (newCount >= 3) {
+      // Reset counter and force show modal
+      setTimeout(() => {
+        console.log('PURCHASE-DEBUG: Force showing purchase modal');
+        setSelectedTab('heatmap');
+        setPurchaseModalOpen(true);
+      }, 100);
+      setCornerTapCount(0);
+    } else {
+      setCornerTapCount(newCount);
+    }
+  };
 
   useEffect(() => {
     // Calculate total screen time
@@ -309,21 +331,108 @@ const DetailedAnalytics = () => {
   const handleTabChange = (tab: string | null) => {
     if (!tab) return;
     
-    const tabId = `${tab}_tab`;
-    if (isTabUnlocked(tabId)) {
-      setActiveTab(tab);
-    } else {
-      setSelectedTab(tab);
-      setPurchaseModalOpen(true);
+    console.log('PURCHASE-DEBUG: Tab change requested:', tab);
+    
+    try {
+      // Add a button click sound or some visual feedback that the tab was clicked
+      if (tab === 'settings') {
+        // Settings tab is always unlocked
+        console.log('PURCHASE-DEBUG: Settings tab selected - always unlocked');
+        setActiveTab(tab);
+        return;
+      }
+      
+      const tabId = `${tab}_tab`;
+      console.log('PURCHASE-DEBUG: Checking unlock status for', tabId);
+      
+      // First check if the tab is unlocked
+      const unlocked = isTabUnlocked(tabId);
+      console.log('PURCHASE-DEBUG: Tab locked status result:', unlocked ? 'UNLOCKED' : 'LOCKED');
+      
+      if (unlocked) {
+        console.log('PURCHASE-DEBUG: Tab is unlocked, activating tab');
+        setActiveTab(tab);
+      } else {
+        console.log('PURCHASE-DEBUG: Tab is locked, opening purchase modal');
+        
+        // Force render the purchase modal
+        setSelectedTab(tab);
+        setPurchaseModalOpen(true);
+        
+        // Force log the state to ensure we're setting it correctly
+        console.log('PURCHASE-DEBUG: Selected tab set to:', tab);
+        console.log('PURCHASE-DEBUG: Purchase modal opened:', true);
+      }
+    } catch (error) {
+      console.error('PURCHASE-DEBUG: Error in handleTabChange:', error);
     }
   };
 
   const handlePurchase = async (productId: string) => {
-    const success = await purchaseProduct(productId);
-    if (success && selectedTab) {
-      setActiveTab(selectedTab);
-      setPurchaseModalOpen(false);
+    console.log('PURCHASE-DEBUG: Purchase initiated for:', productId);
+    try {
+      const success = await purchaseProduct(productId);
+      console.log('PURCHASE-DEBUG: Purchase result:', success);
+      
+      if (success && selectedTab) {
+        console.log('PURCHASE-DEBUG: Purchase successful, activating tab:', selectedTab);
+        setActiveTab(selectedTab);
+        setPurchaseModalOpen(false);
+      }
+    } catch (error) {
+      console.error('PURCHASE-DEBUG: Error during purchase:', error);
     }
+  };
+
+  // Handler for the debug button
+  const handleDebugButtonClick = () => {
+    console.log('PURCHASE-DEBUG: Debug button clicked');
+    
+    // Try to show the modal
+    setSelectedTab('heatmap');
+    setPurchaseModalOpen(true);
+    
+    // Wait a bit and check if the modal is visible
+    setTimeout(() => {
+      // Show a simple alert as fallback to ensure something is visible
+      alert(`Testing Purchase Flow\n\nWould you like to purchase: ${selectedTab || 'heatmap'}_tab?`);
+    }, 500);
+  };
+
+  // Component for testing purchases directly
+  const PurchaseTestUI = () => {
+    if (!TESTING_MODE) return null;
+    
+    const directPurchase = (productId: string) => {
+      console.log('PURCHASE-DEBUG: Direct purchase for:', productId);
+      handlePurchase(productId);
+    };
+    
+    return (
+      <div style={{ 
+        position: 'fixed', 
+        top: '70px', 
+        right: '10px', 
+        zIndex: 9999,
+        background: 'rgba(0,0,0,0.8)', 
+        padding: '10px',
+        borderRadius: '5px',
+        border: '1px solid #FF00FF'
+      }}>
+        <Text style={{ color: 'white', marginBottom: '5px', fontSize: '12px' }}>Direct Testing</Text>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+          <Button size="xs" onClick={() => directPurchase('heatmap_tab')}>
+            Buy Heatmap
+          </Button>
+          <Button size="xs" onClick={() => directPurchase('timeline_tab')}>
+            Buy Timeline
+          </Button>
+          <Button size="xs" onClick={() => directPurchase('all_tabs_bundle')}>
+            Buy Bundle
+          </Button>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -340,6 +449,59 @@ const DetailedAnalytics = () => {
         overflowY: 'visible'
       }}
     >
+      <PurchaseTestUI />
+      
+      {/* Hidden gesture area to force show purchase modal */}
+      <div 
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: '60px',
+          height: '60px',
+          zIndex: 1000,
+        }}
+        onClick={handleCornerTap}
+      />
+      
+      {/* Debug button for testing purchase modal */}
+      {TESTING_MODE && (
+        <>
+          <Button
+            onClick={handleDebugButtonClick}
+            style={{
+              position: 'absolute',
+              top: '10px',
+              right: '10px',
+              zIndex: 1000,
+              background: 'red'
+            }}
+            size="xs"
+          >
+            Test Modal
+          </Button>
+          
+          <Button
+            onClick={() => {
+              console.log('PURCHASE-DEBUG: Direct purchase button clicked');
+              // Directly call purchase without showing modal
+              const tabToPurchase = 'heatmap_tab';
+              handlePurchase(tabToPurchase);
+            }}
+            style={{
+              position: 'absolute',
+              top: '40px',
+              right: '10px',
+              zIndex: 1000,
+              background: 'green'
+            }}
+            size="xs"
+          >
+            Buy Direct
+          </Button>
+        </>
+      )}
+
       <Title
         order={1}
         style={{
@@ -432,30 +594,75 @@ const DetailedAnalytics = () => {
           <Tabs.Tab 
             value="heatmap"
             data-locked={!isTabUnlocked('heatmap_tab')}
+            onClick={(e) => {
+              if (!isTabUnlocked('heatmap_tab')) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('PURCHASE-DEBUG: Heatmap tab clicked directly - opening modal');
+                setSelectedTab('heatmap');
+                setPurchaseModalOpen(true);
+              }
+            }}
           >
             HEATMAP {!isTabUnlocked('heatmap_tab') && '🔒'}
           </Tabs.Tab>
           <Tabs.Tab 
             value="timeline"
             data-locked={!isTabUnlocked('timeline_tab')}
+            onClick={(e) => {
+              if (!isTabUnlocked('timeline_tab')) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('PURCHASE-DEBUG: Timeline tab clicked directly - opening modal');
+                setSelectedTab('timeline');
+                setPurchaseModalOpen(true);
+              }
+            }}
           >
             TIMELINE {!isTabUnlocked('timeline_tab') && '🔒'}
           </Tabs.Tab>
           <Tabs.Tab 
             value="insights"
             data-locked={!isTabUnlocked('insights_tab')}
+            onClick={(e) => {
+              if (!isTabUnlocked('insights_tab')) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('PURCHASE-DEBUG: Insights tab clicked directly - opening modal');
+                setSelectedTab('insights');
+                setPurchaseModalOpen(true);
+              }
+            }}
           >
             INSIGHTS {!isTabUnlocked('insights_tab') && '🔒'}
           </Tabs.Tab>
           <Tabs.Tab 
             value="details"
             data-locked={!isTabUnlocked('details_tab')}
+            onClick={(e) => {
+              if (!isTabUnlocked('details_tab')) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('PURCHASE-DEBUG: Details tab clicked directly - opening modal');
+                setSelectedTab('details');
+                setPurchaseModalOpen(true);
+              }
+            }}
           >
             DETAILS {!isTabUnlocked('details_tab') && '🔒'}
           </Tabs.Tab>
           <Tabs.Tab 
             value="focus"
             data-locked={!isTabUnlocked('focus_tab')}
+            onClick={(e) => {
+              if (!isTabUnlocked('focus_tab')) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('PURCHASE-DEBUG: Focus tab clicked directly - opening modal');
+                setSelectedTab('focus');
+                setPurchaseModalOpen(true);
+              }
+            }}
           >
             FOCUS {!isTabUnlocked('focus_tab') && '🔒'}
           </Tabs.Tab>
@@ -1232,6 +1439,18 @@ const DetailedAnalytics = () => {
         opened={purchaseModalOpen}
         onClose={() => setPurchaseModalOpen(false)}
         title="Unlock Advanced Features"
+        style={{ zIndex: 9999 }}
+        centered
+        withCloseButton
+        radius="md"
+        shadow="xl"
+        size="md"
+        closeButtonProps={{
+          size: 'lg'
+        }}
+        overlayProps={{
+          opacity: 0.8
+        }}
         styles={{
           title: {
             color: '#00FFFF',
@@ -1241,10 +1460,28 @@ const DetailedAnalytics = () => {
           },
           content: {
             background: '#000020',
-            border: '1px solid #FF00FF',
+            border: '2px solid #FF00FF',
+            zIndex: 10000 // Ensure it's on top
+          },
+          header: {
+            background: 'rgba(255, 0, 255, 0.1)',
+            padding: '1rem',
+            marginBottom: '1rem'
           },
           body: {
-            color: '#FFFFFF'
+            color: '#FFFFFF',
+            padding: '1rem'
+          },
+          close: {
+            color: '#FFFFFF',
+            '&:hover': {
+              background: 'rgba(255, 255, 255, 0.1)'
+            }
+          },
+          overlay: {
+            backdropFilter: 'blur(3px)',
+            background: 'rgba(0, 0, 20, 0.8)',
+            zIndex: 9998
           }
         }}
       >
@@ -1265,7 +1502,9 @@ const DetailedAnalytics = () => {
                   onClick={() => handlePurchase(`${selectedTab}_tab`)}
                   style={{
                     background: 'linear-gradient(45deg, #FF00FF, #00FFFF)',
-                    marginBottom: '1rem'
+                    marginBottom: '1rem',
+                    padding: '1rem',
+                    fontWeight: 'bold'
                   }}
                 >
                   Unlock {selectedTab.toUpperCase()} Tab - €1.99
@@ -1280,7 +1519,10 @@ const DetailedAnalytics = () => {
                 onClick={() => handlePurchase('all_tabs_bundle')}
                 style={{
                   borderColor: '#FF00FF',
-                  color: '#FF00FF'
+                  color: '#FF00FF',
+                  borderWidth: '2px',
+                  padding: '1rem',
+                  fontWeight: 'bold'
                 }}
               >
                 Unlock All Tabs - €4.99
