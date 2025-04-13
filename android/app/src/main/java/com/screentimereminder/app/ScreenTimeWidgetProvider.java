@@ -193,14 +193,45 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
                         try {
                             String usageData = intent.getStringExtra("usageData");
                             JSONObject data = new JSONObject(usageData);
-                            float totalScreenTime = (float) data.getDouble("totalScreenTime");
-                            int screenTimeLimit = data.getInt("screenTimeLimit");
                             
-                            Log.d(TAG, "Updating widget with new data - Time: " + totalScreenTime + ", Limit: " + screenTimeLimit);
-                            
-                            // Update all widgets with the new data
-                            for (int appWidgetId : appWidgetIds) {
-                                updateWidget(context, appWidgetManager, appWidgetId, totalScreenTime, screenTimeLimit);
+                            // Check if this is a settings update message
+                            String messageAction = data.optString("action", "");
+                            if ("UPDATE_SETTINGS".equals(messageAction)) {
+                                String chainId = data.optString("chainId", "unknown");
+                                long screenTimeLimit = data.optLong("screenTimeLimit", AppUsageTracker.DEFAULT_SCREEN_TIME_LIMIT);
+                                long notificationFrequency = data.optLong("notificationFrequency", AppUsageTracker.DEFAULT_NOTIFICATION_FREQUENCY);
+                                
+                                Log.d(TAG, String.format("[%s] Received settings update broadcast in Widget:", chainId));
+                                Log.d(TAG, String.format("[%s] - Screen time limit: %d minutes", chainId, screenTimeLimit));
+                                
+                                // Update local settings to match the broadcast
+                                SharedPreferences prefs = context.getSharedPreferences(AppUsageTracker.PREFS_NAME, Context.MODE_PRIVATE);
+                                SharedPreferences.Editor editor = prefs.edit();
+                                editor.putLong(AppUsageTracker.KEY_SCREEN_TIME_LIMIT, screenTimeLimit);
+                                editor.putLong(AppUsageTracker.KEY_NOTIFICATION_FREQUENCY, notificationFrequency);
+                                editor.putString("lastSettingsChainId", chainId);
+                                editor.putBoolean("userHasSetLimit", true);
+                                
+                                // Apply changes synchronously to ensure they are saved immediately
+                                boolean success = editor.commit();
+                                
+                                Log.d(TAG, String.format("[%s] Settings applied in Widget (success: %b)", chainId, success));
+                                
+                                // Update widget with new settings
+                                float currentScreenTime = getTodayScreenTime(context);
+                                for (int appWidgetId : appWidgetIds) {
+                                    updateWidget(context, appWidgetManager, appWidgetId, currentScreenTime, (int)screenTimeLimit);
+                                }
+                            } else {
+                                float totalScreenTime = (float) data.getDouble("totalScreenTime");
+                                int screenTimeLimit = data.getInt("screenTimeLimit");
+                                
+                                Log.d(TAG, "Updating widget with new data - Time: " + totalScreenTime + ", Limit: " + screenTimeLimit);
+                                
+                                // Update all widgets with the new data
+                                for (int appWidgetId : appWidgetIds) {
+                                    updateWidget(context, appWidgetManager, appWidgetId, totalScreenTime, screenTimeLimit);
+                                }
                             }
                         } catch (Exception e) {
                             Log.e(TAG, "Error parsing usage data", e);

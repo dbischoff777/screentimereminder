@@ -22,6 +22,7 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
+import android.os.BatteryManager;
 
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -45,6 +46,7 @@ import java.util.Date;
 import java.util.concurrent.ExecutorService;
 import java.util.HashSet;
 import java.util.Set;
+import java.io.File;
 
 import androidx.core.app.NotificationCompat;
 import android.appwidget.AppWidgetManager;
@@ -79,6 +81,68 @@ public class AppUsageTracker extends Plugin {
     // Add a static lock for synchronization
     private static final Object settingsLock = new Object();
     
+    // Add these class variables for caching
+    private static final String ICON_CACHE_DIR = "icon_cache";
+    private static Map<String, String> iconCache = new HashMap<>();
+    private static long iconCacheLastCleanup = 0;
+    private static final long CACHE_CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+    
+    // Add battery management variables
+    private BatteryManager batteryManager;
+    private static final int LOW_BATTERY_THRESHOLD = 15; // 15%
+    private static final int CRITICAL_BATTERY_THRESHOLD = 5; // 5%
+    private static final long NORMAL_UPDATE_INTERVAL = 60 * 1000; // 1 minute
+    private static final long LOW_BATTERY_UPDATE_INTERVAL = 5 * 60 * 1000; // 5 minutes
+    private static final long CRITICAL_BATTERY_UPDATE_INTERVAL = 15 * 60 * 1000; // 15 minutes
+    private long currentUpdateInterval = NORMAL_UPDATE_INTERVAL;
+    
+    // Add constants for pub/sub mechanism
+    private static final String PUBSUB_CHANNEL = "app_usage_updates";
+    private static final String ACTION_USAGE_UPDATE = "com.screentimereminder.app.APP_USAGE_UPDATE";
+    private static final String ACTION_BACKGROUND_DETECTED = "com.screentimereminder.app.BACKGROUND_DETECTED";
+    
+    // Background detection variables
+    private static final long BACKGROUND_DETECTION_INTERVAL = 30 * 1000; // 30 seconds
+    private static final long BACKGROUND_USAGE_THRESHOLD = 2 * 60 * 1000; // 2 minutes
+    private Map<String, AppUsageInfo> appUsageInfo = new HashMap<>();
+    private Handler backgroundDetectionHandler;
+    private Runnable backgroundDetectionRunnable;
+
+    /**
+     * Class to track app foreground/background state
+     */
+    private static class AppUsageInfo {
+        String packageName;
+        String appName;
+        long lastForegroundTime = 0;
+        long lastBackgroundTime = 0;
+        long foregroundDuration = 0;
+        long backgroundDuration = 0;
+        boolean isInForeground = false;
+        
+        public AppUsageInfo(String packageName, String appName) {
+            this.packageName = packageName;
+            this.appName = appName;
+        }
+        
+        public JSONObject toJson() {
+            try {
+                JSONObject json = new JSONObject();
+                json.put("packageName", packageName);
+                json.put("appName", appName);
+                json.put("foregroundDuration", foregroundDuration / 60000.0); // Convert to minutes
+                json.put("backgroundDuration", backgroundDuration / 60000.0); // Convert to minutes
+                json.put("isInForeground", isInForeground);
+                json.put("lastForegroundTime", lastForegroundTime);
+                json.put("lastBackgroundTime", lastBackgroundTime);
+                return json;
+            } catch (Exception e) {
+                Log.e("AppUsageTracker", "Error creating JSON for " + packageName, e);
+                return new JSONObject();
+            }
+        }
+    }
+
     public static AppUsageTracker getInstance(Context context) {
         synchronized (settingsLock) {
             if (instance == null) {
@@ -122,17 +186,40 @@ public class AppUsageTracker extends Plugin {
                 } else if (frequencyValue instanceof Long) {
                     notificationFrequency = (Long) frequencyValue;
                 } else {
-                    notificationFrequency = DEFAULT_NOTIFICATION_FREQUENCY;
+                    // Only use default if no value exists
+                    notificationFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
                 }
                 
                 String chainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
                 
-                // Save values back to ensure consistent storage
-                SharedPreferences.Editor editor = prefs.edit();
-                editor.putLong(KEY_SCREEN_TIME_LIMIT, screenTimeLimit);
-                editor.putLong(KEY_NOTIFICATION_FREQUENCY, notificationFrequency);
-                editor.putString("lastSettingsChainId", chainId);
-                editor.apply();
+                // Only save values if they are different from current values
+                long currentLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+                long currentFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
+                
+                if (screenTimeLimit != currentLimit || notificationFrequency != currentFrequency) {
+                    SharedPreferences.Editor editor = prefs.edit();
+                    
+                    if (screenTimeLimit != currentLimit) {
+                        editor.putLong(KEY_SCREEN_TIME_LIMIT, screenTimeLimit);
+                    }
+                    
+                    if (notificationFrequency != currentFrequency) {
+                        editor.putLong(KEY_NOTIFICATION_FREQUENCY, notificationFrequency);
+                    }
+                    
+                    editor.putString("lastSettingsChainId", chainId);
+                    editor.commit(); // Use commit for immediate write
+                    
+                    Log.d(TAG, String.format("[%s] Updated settings in loadScreenTimeLimit:", chainId));
+                    if (screenTimeLimit != currentLimit) {
+                        Log.d(TAG, String.format("[%s] - Screen time limit: %d -> %d minutes", 
+                            chainId, currentLimit, screenTimeLimit));
+                    }
+                    if (notificationFrequency != currentFrequency) {
+                        Log.d(TAG, String.format("[%s] - Notification frequency: %d -> %d minutes", 
+                            chainId, currentFrequency, notificationFrequency));
+                    }
+                }
                 
                 // Log the loaded values
                 Log.d(TAG, String.format("[%s] Loaded settings from SharedPreferences:", chainId));
@@ -153,8 +240,8 @@ public class AppUsageTracker extends Plugin {
                 
             } catch (Exception e) {
                 Log.e(TAG, "Error loading screen time limit", e);
-                // Set default values in SharedPreferences
-                if (prefs != null) {
+                // Only set defaults if prefs is null or empty
+                if (prefs != null && !prefs.contains(KEY_SCREEN_TIME_LIMIT)) {
                     SharedPreferences.Editor editor = prefs.edit();
                     editor.putLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
                     editor.putLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
@@ -196,18 +283,30 @@ public class AppUsageTracker extends Plugin {
                 return;
             }
             
+            // Initialize background detection
+            backgroundDetectionHandler = new Handler(Looper.getMainLooper());
+            backgroundDetectionRunnable = this::trackBackgroundUsage;
+            
             // Initialize other components
             this.prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
             this.usageStatsManager = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
             this.notificationService = new NotificationService(context);
+            
+            // Initialize battery manager
+            this.batteryManager = (BatteryManager) context.getSystemService(Context.BATTERY_SERVICE);
+            
+            // Register battery change receiver
+            IntentFilter batteryFilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+            context.registerReceiver(batteryChangeReceiver, batteryFilter);
             
             // Load settings
             loadScreenTimeLimit();
             
             // Register broadcast receiver with proper flags for Android 13+
             IntentFilter filter = new IntentFilter();
-            filter.addAction("com.screentimereminder.app.APP_USAGE_UPDATE");
+            filter.addAction(ACTION_USAGE_UPDATE);
             filter.addAction("com.screentimereminder.app.REFRESH_WIDGET");
+            filter.addAction(ACTION_BACKGROUND_DETECTED);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 context.registerReceiver(refreshReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
             } else {
@@ -246,6 +345,13 @@ public class AppUsageTracker extends Plugin {
         try {
             // Unregister the refresh receiver
             getContext().unregisterReceiver(refreshReceiver);
+            
+            // Unregister battery receiver
+            try {
+                getContext().unregisterReceiver(batteryChangeReceiver);
+            } catch (Exception e) {
+                Log.e(TAG, "Error unregistering battery receiver", e);
+            }
             
             // Stop tracking if active
             if (scheduler != null && !scheduler.isShutdown()) {
@@ -309,8 +415,128 @@ public class AppUsageTracker extends Plugin {
             isTracking = true;
             lastUpdateTime = System.currentTimeMillis();
             
-            // Start periodic updates
+            // Start background usage detection
+            startBackgroundDetection();
+            
+            // Determine initial update interval based on battery level
+            adjustTrackingForBatteryLevel();
+            
+            // Start periodic updates with battery-aware scheduling
             if (scheduler == null || scheduler.isShutdown()) {
+                scheduler = Executors.newSingleThreadScheduledExecutor();
+                scheduler.scheduleAtFixedRate(() -> {
+                    try {
+                        if (isTracking) {
+                            updateAppUsage();
+                            // Readjust interval for next execution based on current battery
+                            adjustSchedulerInterval();
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error in periodic update", e);
+                    }
+                }, 0, currentUpdateInterval, TimeUnit.MILLISECONDS);
+            }
+
+            call.resolve();
+        } catch (Exception e) {
+            Log.e(TAG, "Error starting tracking", e);
+            call.reject("Failed to start tracking: " + e.getMessage());
+        }
+    }
+    
+    // Battery change receiver to detect battery level changes
+    private final BroadcastReceiver batteryChangeReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            if (intent.getAction().equals(Intent.ACTION_BATTERY_CHANGED)) {
+                int level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
+                int scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
+                
+                if (level != -1 && scale != -1) {
+                    int batteryPct = (int) ((level / (float) scale) * 100);
+                    Log.d(TAG, "Battery changed: " + batteryPct + "%");
+                    
+                    // Adjust tracking frequency based on battery level
+                    adjustTrackingForBatteryLevel(batteryPct);
+                }
+            }
+        }
+    };
+    
+    /**
+     * Adjust tracking frequency based on battery level
+     */
+    private void adjustTrackingForBatteryLevel() {
+        if (batteryManager == null) {
+            // Get current battery level if batteryManager is available
+            batteryManager = (BatteryManager) getContext().getSystemService(Context.BATTERY_SERVICE);
+        }
+        
+        if (batteryManager != null) {
+            int batteryLevel = batteryManager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
+            adjustTrackingForBatteryLevel(batteryLevel);
+        }
+    }
+    
+    /**
+     * Adjust tracking frequency based on specific battery level
+     */
+    private void adjustTrackingForBatteryLevel(int batteryLevel) {
+        // Check if device is charging
+        boolean isCharging = isDeviceCharging();
+        
+        if (!isCharging) {
+            if (batteryLevel <= CRITICAL_BATTERY_THRESHOLD) {
+                Log.d(TAG, "Critical battery level: " + batteryLevel + "%. Reducing tracking frequency significantly.");
+                currentUpdateInterval = CRITICAL_BATTERY_UPDATE_INTERVAL;
+            } else if (batteryLevel <= LOW_BATTERY_THRESHOLD) {
+                Log.d(TAG, "Low battery level: " + batteryLevel + "%. Reducing tracking frequency.");
+                currentUpdateInterval = LOW_BATTERY_UPDATE_INTERVAL;
+            } else {
+                Log.d(TAG, "Normal battery level: " + batteryLevel + "%. Using standard tracking frequency.");
+                currentUpdateInterval = NORMAL_UPDATE_INTERVAL;
+            }
+        } else {
+            // Device is charging, use normal frequency
+            Log.d(TAG, "Device is charging. Using standard tracking frequency.");
+            currentUpdateInterval = NORMAL_UPDATE_INTERVAL;
+        }
+        
+        // Adjust scheduler if it's already running
+        adjustSchedulerInterval();
+    }
+    
+    /**
+     * Check if device is currently charging
+     */
+    private boolean isDeviceCharging() {
+        if (batteryManager == null) {
+            batteryManager = (BatteryManager) getContext().getSystemService(Context.BATTERY_SERVICE);
+        }
+        
+        if (batteryManager != null) {
+            return batteryManager.isCharging();
+        }
+        
+        // Fallback to intent if BatteryManager is unavailable
+        IntentFilter ifilter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
+        Intent batteryStatus = getContext().registerReceiver(null, ifilter);
+        if (batteryStatus != null) {
+            int status = batteryStatus.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
+            return status == BatteryManager.BATTERY_STATUS_CHARGING || 
+                   status == BatteryManager.BATTERY_STATUS_FULL;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Adjust scheduler interval based on current battery level
+     */
+    private void adjustSchedulerInterval() {
+        if (scheduler != null && !scheduler.isShutdown()) {
+            try {
+                scheduler.shutdown();
                 scheduler = Executors.newSingleThreadScheduledExecutor();
                 scheduler.scheduleAtFixedRate(() -> {
                     try {
@@ -320,13 +546,12 @@ public class AppUsageTracker extends Plugin {
                     } catch (Exception e) {
                         Log.e(TAG, "Error in periodic update", e);
                     }
-                }, 0, 1, TimeUnit.MINUTES);
+                }, 0, currentUpdateInterval, TimeUnit.MILLISECONDS);
+                
+                Log.d(TAG, "Scheduler adjusted to interval: " + (currentUpdateInterval / 1000) + " seconds");
+            } catch (Exception e) {
+                Log.e(TAG, "Error adjusting scheduler interval", e);
             }
-
-            call.resolve();
-        } catch (Exception e) {
-            Log.e(TAG, "Error starting tracking", e);
-            call.reject("Failed to start tracking: " + e.getMessage());
         }
     }
     
@@ -426,7 +651,11 @@ public class AppUsageTracker extends Plugin {
             // Stop the background service
             Intent serviceIntent = new Intent(getContext(), AppUsageService.class);
             getContext().stopService(serviceIntent);
-
+            
+            // Stop background detection
+            stopBackgroundDetection();
+            
+            isTracking = false;
             call.resolve();
         } catch (Exception e) {
             Log.e(TAG, "Error stopping tracking", e);
@@ -435,7 +664,249 @@ public class AppUsageTracker extends Plugin {
     }
     
     /**
+     * Start background usage detection
+     */
+    private void startBackgroundDetection() {
+        // Schedule the background detection
+        backgroundDetectionHandler.postDelayed(backgroundDetectionRunnable, BACKGROUND_DETECTION_INTERVAL);
+        Log.d(TAG, "Started background usage detection");
+    }
+    
+    /**
+     * Stop background usage detection
+     */
+    private void stopBackgroundDetection() {
+        backgroundDetectionHandler.removeCallbacks(backgroundDetectionRunnable);
+        Log.d(TAG, "Stopped background usage detection");
+    }
+    
+    /**
+     * Track background app usage
+     */
+    private void trackBackgroundUsage() {
+        if (!isTracking || usageStatsManager == null) {
+            return;
+        }
+        
+        try {
+            long now = System.currentTimeMillis();
+            long queryStart = now - BACKGROUND_DETECTION_INTERVAL * 2; // Look back further to catch events
+            
+            // Get usage events
+            UsageEvents events = usageStatsManager.queryEvents(queryStart, now);
+            if (events == null) {
+                Log.e(TAG, "UsageEvents is null");
+                return;
+            }
+            
+            // Process usage events
+            UsageEvents.Event event = new UsageEvents.Event();
+            Map<String, Long> lastEventTimeMap = new HashMap<>();
+            Map<String, AppUsageInfo> updatedApps = new HashMap<>();
+            
+            while (events.hasNextEvent()) {
+                events.getNextEvent(event);
+                String packageName = event.getPackageName();
+                
+                // Skip our own app
+                if (packageName.equals(getContext().getPackageName())) {
+                    continue;
+                }
+                
+                // Skip system apps
+                if (isSystemApp(getContext(), packageName)) {
+                    continue;
+                }
+                
+                // Get or create AppUsageInfo
+                AppUsageInfo info = appUsageInfo.get(packageName);
+                if (info == null) {
+                    String appName = getAppName(packageName);
+                    info = new AppUsageInfo(packageName, appName);
+                    appUsageInfo.put(packageName, info);
+                }
+                
+                if (event.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                    if (!info.isInForeground) {
+                        // App moving to foreground
+                        info.isInForeground = true;
+                        info.lastForegroundTime = event.getTimeStamp();
+                        
+                        // If it was in background before, calculate background time
+                        if (info.lastBackgroundTime > 0) {
+                            long bgTime = event.getTimeStamp() - info.lastBackgroundTime;
+                            if (bgTime > BACKGROUND_USAGE_THRESHOLD) {
+                                // Only count significant background time
+                                info.backgroundDuration += bgTime;
+                                updatedApps.put(packageName, info);
+                                Log.d(TAG, packageName + " was in background for " + (bgTime / 1000) + " seconds");
+                            }
+                        }
+                    }
+                } else if (event.getEventType() == UsageEvents.Event.MOVE_TO_BACKGROUND) {
+                    if (info.isInForeground) {
+                        // App moving to background
+                        info.isInForeground = false;
+                        info.lastBackgroundTime = event.getTimeStamp();
+                        
+                        // Calculate foreground duration
+                        if (info.lastForegroundTime > 0) {
+                            long fgTime = event.getTimeStamp() - info.lastForegroundTime;
+                            info.foregroundDuration += fgTime;
+                            updatedApps.put(packageName, info);
+                            Log.d(TAG, packageName + " was in foreground for " + (fgTime / 1000) + " seconds");
+                        }
+                    }
+                }
+            }
+            
+            // Check for apps still in foreground
+            for (AppUsageInfo info : appUsageInfo.values()) {
+                if (info.isInForeground && info.lastForegroundTime > 0) {
+                    long fgTime = now - info.lastForegroundTime;
+                    // Track ongoing foreground usage
+                    Log.d(TAG, info.packageName + " is still in foreground for " + (fgTime / 1000) + " seconds");
+                    
+                    // If significant time has passed, update foreground duration and notify
+                    if (fgTime > 60000) { // 1 minute
+                        info.foregroundDuration += fgTime;
+                        info.lastForegroundTime = now; // Reset the start time
+                        updatedApps.put(info.packageName, info);
+                    }
+                }
+            }
+            
+            // Send updates for changed apps
+            if (!updatedApps.isEmpty()) {
+                publishBackgroundUsageUpdates(updatedApps);
+            }
+            
+        } catch (Exception e) {
+            Log.e(TAG, "Error tracking background usage", e);
+        } finally {
+            // Schedule next check
+            backgroundDetectionHandler.postDelayed(backgroundDetectionRunnable, BACKGROUND_DETECTION_INTERVAL);
+        }
+    }
+    
+    /**
+     * Publish background usage updates
+     */
+    private void publishBackgroundUsageUpdates(Map<String, AppUsageInfo> updatedApps) {
+        try {
+            // Create JSON array of updated apps
+            JSONArray appsArray = new JSONArray();
+            for (AppUsageInfo info : updatedApps.values()) {
+                appsArray.put(info.toJson());
+            }
+            
+            // Create update object
+            JSONObject updateData = new JSONObject();
+            updateData.put("type", "background_usage");
+            updateData.put("timestamp", System.currentTimeMillis());
+            updateData.put("apps", appsArray);
+            
+            // Broadcast update
+            Intent intent = new Intent(ACTION_BACKGROUND_DETECTED);
+            intent.putExtra("data", updateData.toString());
+            getContext().sendBroadcast(intent);
+            
+            // Notify Capacitor
+            JSObject jsData = new JSObject();
+            jsData.put("data", updateData.toString());
+            notifyListeners("backgroundUsage", jsData);
+            
+            Log.d(TAG, "Published background usage updates for " + updatedApps.size() + " apps");
+        } catch (Exception e) {
+            Log.e(TAG, "Error publishing background usage updates", e);
+        }
+    }
+
+    /**
+     * More efficient broadcasting of usage data
+     */
+    private void broadcastUsageData(Context context) {
+        try {
+            // Get the stored values directly from SharedPreferences
+            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            float totalScreenTime = getSafeScreenTime(prefs);
+            long screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+
+            // Create JSON object with the data
+            JSONObject data = new JSONObject();
+            data.put("totalScreenTime", totalScreenTime);
+            data.put("screenTimeLimit", screenTimeLimit);
+            data.put("timestamp", System.currentTimeMillis());
+            data.put("isImportant", true);  // Mark as important update
+
+            // Use more efficient broadcast mechanism
+            publishUsageUpdate(data);
+            
+            Log.d(TAG, "Broadcasting usage data: " + data.toString());
+        } catch (Exception e) {
+            Log.e(TAG, "Error broadcasting usage data", e);
+        }
+    }
+    
+    /**
+     * Publish usage update to all listeners
+     */
+    private void publishUsageUpdate(JSONObject data) {
+        try {
+            // Broadcast only important updates system-wide
+            boolean isImportant = data.optBoolean("isImportant", false);
+            if (isImportant) {
+                Intent broadcastIntent = new Intent(ACTION_USAGE_UPDATE);
+                broadcastIntent.putExtra("usageData", data.toString());
+                getContext().sendBroadcast(broadcastIntent);
+            }
+            
+            // Always notify Capacitor
+            JSObject jsData = new JSObject();
+            jsData.put("data", data.toString());
+            notifyListeners("appUsageUpdate", jsData);
+            
+            Log.d(TAG, "Published usage update: " + (isImportant ? "important" : "regular"));
+        } catch (Exception e) {
+            Log.e(TAG, "Error publishing usage update", e);
+        }
+    }
+    
+    /**
+     * Get background usage data for apps
+     */
+    @PluginMethod
+    public void getBackgroundUsageData(PluginCall call) {
+        try {
+            JSONObject result = new JSONObject();
+            JSONArray appsArray = new JSONArray();
+            
+            for (AppUsageInfo info : appUsageInfo.values()) {
+                appsArray.put(info.toJson());
+            }
+            
+            result.put("apps", appsArray);
+            result.put("timestamp", System.currentTimeMillis());
+            
+            JSObject jsResult = new JSObject();
+            jsResult.put("data", result.toString());
+            call.resolve(jsResult);
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting background usage data", e);
+            call.reject("Failed to get background usage data: " + e.getMessage());
+        }
+    }
+    
+    /**
      * Get app usage data for a specific time range
+     * 
+     * @param call Capacitor plugin call with optional parameters:
+     *             - startTime: timestamp in milliseconds for query start
+     *             - endTime: timestamp in milliseconds for query end
+     *             - includeIcons: boolean, whether to include app icons (default: true)
+     *             - minTimeThreshold: minimum time in minutes to include an app (default: 0)
+     *             - filterPackages: array of package names to include or exclude
+     *             - filterType: "include" or "exclude" for the filterPackages (default: "exclude")
      */
     @PluginMethod
     public void getAppUsageData(PluginCall call) {
@@ -448,16 +919,88 @@ public class AppUsageTracker extends Plugin {
 
             backgroundExecutor.execute(() -> {
                 try {
+                    // Default time range: start of day to now
                     long startTime = getStartOfDay();
                     long endTime = System.currentTimeMillis();
                     
-                    List<UsageStats> stats = usageStatsManager.queryUsageStats(
-                        UsageStatsManager.INTERVAL_DAILY, startTime, endTime
-                    );
+                    // Parse options from the call data
+                    JSObject options = call.getData();
+                    boolean includeIcons = true;
+                    double minTimeThreshold = 0.0; // in minutes
+                    Set<String> filterPackages = new HashSet<>();
+                    boolean isIncludeFilter = false;
                     
-                    if (stats == null) {
-                        Log.e(TAG, "Usage stats query returned null");
-                        call.reject("Failed to get usage stats");
+                    if (options != null) {
+                        // Time range options
+                        if (options.has("startTime")) {
+                            startTime = options.getLong("startTime");
+                        }
+                        if (options.has("endTime")) {
+                            endTime = options.getLong("endTime");
+                        }
+                        
+                        // Icon option to reduce payload size if needed
+                        if (options.has("includeIcons")) {
+                            includeIcons = options.getBoolean("includeIcons");
+                        }
+                        
+                        // Time threshold to filter out briefly used apps
+                        if (options.has("minTimeThreshold")) {
+                            minTimeThreshold = options.getDouble("minTimeThreshold");
+                        }
+                        
+                        // Handle package filtering
+                        if (options.has("filterPackages") && options.has("filterType")) {
+                            try {
+                                JSONArray filterArray = new JSONArray(options.getString("filterPackages", "[]"));
+                                if (filterArray != null) {
+                                    for (int i = 0; i < filterArray.length(); i++) {
+                                        filterPackages.add(filterArray.getString(i));
+                                    }
+                                }
+                                
+                                String filterType = options.getString("filterType", "exclude");
+                                isIncludeFilter = "include".equalsIgnoreCase(filterType);
+                                
+                                Log.d(TAG, String.format("Using %s filter for %d packages", 
+                                    isIncludeFilter ? "include" : "exclude", filterPackages.size()));
+                            } catch (Exception e) {
+                                Log.e(TAG, "Error parsing filter options", e);
+                            }
+                        }
+                    }
+                    
+                    Log.d(TAG, String.format("Querying app usage from %s to %s", 
+                        new Date(startTime).toString(), new Date(endTime).toString()));
+                    
+                    final boolean finalIncludeIcons = includeIcons;
+                    final double finalMinTimeThreshold = minTimeThreshold;
+                    final Set<String> finalFilterPackages = filterPackages;
+                    final boolean finalIsIncludeFilter = isIncludeFilter;
+                    
+                    // Use queryUsageStats with try-catch for API compatibility
+                    List<UsageStats> stats;
+                    try {
+                        stats = usageStatsManager.queryUsageStats(
+                            UsageStatsManager.INTERVAL_DAILY, startTime, endTime
+                        );
+                        
+                        if (stats == null || stats.isEmpty()) {
+                            // Try with INTERVAL_BEST if daily doesn't work
+                            stats = usageStatsManager.queryUsageStats(
+                                UsageStatsManager.INTERVAL_BEST, startTime, endTime
+                            );
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error querying usage stats", e);
+                        stats = new ArrayList<>();
+                    }
+                    
+                    if (stats == null || stats.isEmpty()) {
+                        Log.e(TAG, "Usage stats query returned null or empty");
+                        mainHandler.post(() -> {
+                            call.reject("Failed to get usage stats, possibly due to permission issues");
+                        });
                         return;
                     }
                     
@@ -466,36 +1009,117 @@ public class AppUsageTracker extends Plugin {
                     JSONArray appsArray = new JSONArray();
                     long totalScreenTime = 0;
                     
+                    // Pre-calculate package names to skip (only our own app)
+                    String ourPackageName = getContext().getPackageName();
+                    
+                    // Use hash map for better performance with larger datasets
+                    Map<String, JSONObject> appDataMap = new HashMap<>();
+                    
+                    // Process all stats first
                     for (UsageStats stat : stats) {
                         String packageName = stat.getPackageName();
                         
-                        if (isSystemApp(getContext(), packageName) || packageName.equals(getContext().getPackageName())) {
+                        // First filter: Skip our own app
+                        if (packageName.equals(ourPackageName)) {
+                            continue;
+                        }
+                        
+                        // Second filter: Check against user-provided filter list
+                        if (!finalFilterPackages.isEmpty()) {
+                            boolean inFilterList = finalFilterPackages.contains(packageName);
+                            if ((finalIsIncludeFilter && !inFilterList) || (!finalIsIncludeFilter && inFilterList)) {
+                                continue;
+                            }
+                        }
+                        
+                        // Third filter: Skip most system apps but keep browsers and email
+                        if (isSystemApp(getContext(), packageName)) {
                             continue;
                         }
                         
                         long timeInForeground = stat.getTotalTimeInForeground();
+                        double timeInMinutes = timeInForeground / 60000.0;
+                        
+                        // Skip apps that weren't used enough
+                        if (timeInMinutes < finalMinTimeThreshold) {
+                            continue;
+                        }
+                        
                         if (timeInForeground > 0) {
-                            double timeInMinutes = timeInForeground / 60000.0;
                             totalScreenTime += timeInForeground;
                             
-                            String appName = getAppName(packageName);
-                            String category = getCategoryForApp(appName);
-                            
-                            JSONObject appData = new JSONObject();
-                            appData.put("name", appName);
-                            appData.put("packageName", packageName);
-                            appData.put("time", timeInMinutes);
-                            appData.put("lastUsed", stat.getLastTimeUsed());
-                            appData.put("category", category);
-                            appData.put("icon", getAppIconBase64(packageName));
-                            
-                            appsArray.put(appData);
+                            try {
+                                String appName = getAppName(packageName);
+                                String category = getCategoryForApp(appName);
+                                
+                                JSONObject appData = new JSONObject();
+                                appData.put("name", appName);
+                                appData.put("packageName", packageName);
+                                appData.put("time", timeInMinutes);
+                                appData.put("lastUsed", stat.getLastTimeUsed());
+                                appData.put("category", category);
+                                
+                                // Only get icons if requested (can save bandwidth)
+                                if (finalIncludeIcons) {
+                                    try {
+                                        // Try to get icon with better error handling
+                                        String iconBase64 = getAppIconBase64(packageName);
+                                        if (iconBase64 != null && !iconBase64.isEmpty()) {
+                                            appData.put("icon", iconBase64);
+                                            Log.d(TAG, "Successfully retrieved icon for " + packageName + " from events");
+                                        } else {
+                                            // Use default placeholder if we couldn't get the icon
+                                            appData.put("icon", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJAAAACQBAMAAAAVaP+LAAAAHlBMVEX///8AAABSUlL09PSjo6M7OzshISGDg4O3t7dpaWmZfZ3LAAABzUlEQVRo3u3aS27kIBTG8XAMS2KP7Ygu+yTsf0UjRVGUDlWBn47a/6+EeHwfsK/NbbmzrjsoQIAAAQIECBAgQIAAAQIECBAgQIAAAfoIUDf3g/Ufo7s78vBoXOD0fc4GptfG2eDQmIfD2aB8bczBEVHV+Dna5XfRP44Zj2I52CMuahsrR7usNl6O1q02Xo6/q42Xg9eFOKKXg8cXiBzx5UD22NGObk8HmR072lF/gTNyNDrHjXXQCQ4yO3Z2EJ3iILNjZgeNrSsctOioo6gTHDPqaGeHDwf9rCNNB7dbnYfD0UHbHfSM59CjjtY7+HVoWh7x4LscPKOjzg6SOmjb9oLaF6jt4DnqaJODxA5a7SDxPLTSUeUOOm/bL9C27Q9o2/YHtG3/B2rb/oa2bbMj1kFYB0sd0Q4SO6IdJHZEO0jqCHeQ1BHtoA9ylNTRxDpI6hhiHTTZUcUOmuwIdhDrIKmDWAdJHcQ6SOoYYx0kdTSxDpI6hlgHzXZUsYPmOIIdxDpI6iDWQVIHsQ6SOsZYB0kdTayDpI4h1kF3+XlsYB0kdRDrIKmDpA5iHSR1EBvWpA5iQ5TUQUIHCR0kdBjHvwAAAP//m1pNlCv43RMAAAAASUVORK5CYII=");
+                                            Log.d(TAG, "Using placeholder icon for " + packageName + " from events");
+                                        }
+                                    } catch (Exception e) {
+                                        // Use a fallback placeholder on error
+                                        appData.put("icon", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJAAAACQBAMAAAAVaP+LAAAAHlBMVEX///8AAABSUlL09PSjo6M7OzshISGDg4O3t7dpaWmZfZ3LAAABzUlEQVRo3u3aS27kIBTG8XAMS2KP7Ygu+yTsf0UjRVGUDlWBn47a/6+EeHwfsK/NbbmzrjsoQIAAAQIECBAgQIAAAQIECBAgQIAAAfoIUDf3g/Ufo7s78vBoXOD0fc4GptfG2eDQmIfD2aB8bczBEVHV+Dna5XfRP44Zj2I52CMuahsrR7usNl6O1q02Xo6/q42Xg9eFOKKXg8cXiBzx5UD22NGObk8HmR072lF/gTNyNDrHjXXQCQ4yO3Z2EJ3iILNjZgeNrSsctOioo6gTHDPqaGeHDwf9rCNNB7dbnYfD0UHbHfSM59CjjtY7+HVoWh7x4LscPKOjzg6SOmjb9oLaF6jt4DnqaJODxA5a7SDxPLTSUeUOOm/bL9C27Q9o2/YHtG3/B2rb/oa2bbMj1kFYB0sd0Q4SO6IdJHZEO0jqCHeQ1BHtoA9ylNTRxDpI6hhiHTTZUcUOmuwIdhDrIKmDWAdJHcQ6SOoYYx0kdTSxDpI6hlgHzXZUsYPmOIIdxDpI6iDWQVIHsQ6SOsZYB0kdTayDpI4h1kF3+XlsYB0kdRDrIKmDpA5iHSR1EBvWpA5iQ5TUQUIHCR0kdBjHvwAAAP//m1pNlCv43RMAAAAASUVORK5CYII=");
+                                        Log.e(TAG, "Error retrieving icon for " + packageName + " from events: " + e.getMessage());
+                                    }
+                                } else {
+                                    appData.put("icon", "");
+                                }
+                                
+                                appsArray.put(appData);
+                                appDataMap.put(packageName, appData);
+                            } catch (Exception e) {
+                                Log.e(TAG, "Error processing app " + packageName, e);
+                            }
+                        }
+                    }
+                    
+                    // If we have insufficient data from UsageStats, try querying events for more accuracy
+                    if (totalScreenTime == 0 || appDataMap.isEmpty()) {
+                        try {
+                            UsageEvents events = usageStatsManager.queryEvents(startTime, endTime);
+                            if (events != null) {
+                                collectDataFromEvents(events, appDataMap, finalIncludeIcons, finalMinTimeThreshold, 
+                                    finalFilterPackages, finalIsIncludeFilter, ourPackageName);
+                                
+                                // Recalculate total time after events processing
+                                totalScreenTime = 0;
+                                for (JSONObject appData : appDataMap.values()) {
+                                    totalScreenTime += (long)(appData.getDouble("time") * 60000);
+                                }
+                                
+                                // Rebuild the array with updated data
+                                appsArray = new JSONArray();
+                                for (JSONObject appData : appDataMap.values()) {
+                                    appsArray.put(appData);
+                                }
+                            }
+                        } catch (Exception e) {
+                            Log.e(TAG, "Error querying events", e);
                         }
                     }
                     
                     result.put("apps", appsArray);
                     result.put("totalScreenTime", totalScreenTime / 60000.0);
                     result.put("timestamp", System.currentTimeMillis());
+                    result.put("timeRange", new JSONObject()
+                        .put("startTime", startTime)
+                        .put("endTime", endTime));
                     
                     // Convert JSONObject to JSObject before resolving
                     JSObject jsResult = new JSObject();
@@ -510,6 +1134,122 @@ public class AppUsageTracker extends Plugin {
         } catch (Exception e) {
             Log.e(TAG, "Error in getAppUsageData", e);
             call.reject("Error in getAppUsageData: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Helper method to collect app usage data from UsageEvents
+     * This can be more accurate than UsageStats in some cases
+     */
+    private void collectDataFromEvents(UsageEvents events, Map<String, JSONObject> appDataMap, 
+            boolean includeIcons, double minTimeThreshold, Set<String> filterPackages, 
+            boolean isIncludeFilter, String ourPackageName) throws JSONException {
+        
+        UsageEvents.Event event = new UsageEvents.Event();
+        Map<String, Long> lastEventTimeMap = new HashMap<>();
+        Map<String, Double> appTimeMap = new HashMap<>();
+        
+        while (events.hasNextEvent()) {
+            events.getNextEvent(event);
+            String packageName = event.getPackageName();
+            
+            // Skip our own app
+            if (packageName.equals(ourPackageName)) {
+                continue;
+            }
+            
+            // Apply filters
+            if (!filterPackages.isEmpty()) {
+                boolean inFilterList = filterPackages.contains(packageName);
+                if ((isIncludeFilter && !inFilterList) || (!isIncludeFilter && inFilterList)) {
+                    continue;
+                }
+            }
+            
+            // Skip system apps but keep browsers and email
+            if (isSystemApp(getContext(), packageName)) {
+                continue;
+            }
+            
+            if (event.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                lastEventTimeMap.put(packageName, event.getTimeStamp());
+            } else if (event.getEventType() == UsageEvents.Event.MOVE_TO_BACKGROUND) {
+                Long lastTime = lastEventTimeMap.get(packageName);
+                if (lastTime != null) {
+                    double timeSpentMinutes = (event.getTimeStamp() - lastTime) / 60000.0;
+                    Double currentTime = appTimeMap.getOrDefault(packageName, 0.0);
+                    appTimeMap.put(packageName, currentTime + timeSpentMinutes);
+                    lastEventTimeMap.remove(packageName);
+                }
+            }
+        }
+        
+        // Handle apps still in foreground at query end time
+        long endTime = System.currentTimeMillis();
+        for (Map.Entry<String, Long> entry : lastEventTimeMap.entrySet()) {
+            String packageName = entry.getKey();
+            long lastTime = entry.getValue();
+            double timeSpentMinutes = (endTime - lastTime) / 60000.0;
+            Double currentTime = appTimeMap.getOrDefault(packageName, 0.0);
+            appTimeMap.put(packageName, currentTime + timeSpentMinutes);
+        }
+        
+        // Add events data to the result map
+        for (Map.Entry<String, Double> entry : appTimeMap.entrySet()) {
+            String packageName = entry.getKey();
+            double timeInMinutes = entry.getValue();
+            
+            // Skip apps that weren't used enough
+            if (timeInMinutes < minTimeThreshold) {
+                continue;
+            }
+            
+            // Update existing app data or create new entry
+            JSONObject appData = appDataMap.get(packageName);
+            if (appData == null) {
+                try {
+                    String appName = getAppName(packageName);
+                    String category = getCategoryForApp(appName);
+                    
+                    appData = new JSONObject();
+                    appData.put("name", appName);
+                    appData.put("packageName", packageName);
+                    appData.put("time", timeInMinutes);
+                    appData.put("lastUsed", System.currentTimeMillis());
+                    appData.put("category", category);
+                    
+                    if (includeIcons) {
+                        try {
+                            // Try to get icon with better error handling
+                            String iconBase64 = getAppIconBase64(packageName);
+                            if (iconBase64 != null && !iconBase64.isEmpty()) {
+                                appData.put("icon", iconBase64);
+                                Log.d(TAG, "Successfully retrieved icon for " + packageName + " from events");
+                            } else {
+                                // Use default placeholder if we couldn't get the icon
+                                appData.put("icon", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJAAAACQBAMAAAAVaP+LAAAAHlBMVEX///8AAABSUlL09PSjo6M7OzshISGDg4O3t7dpaWmZfZ3LAAABzUlEQVRo3u3aS27kIBTG8XAMS2KP7Ygu+yTsf0UjRVGUDlWBn47a/6+EeHwfsK/NbbmzrjsoQIAAAQIECBAgQIAAAQIECBAgQIAAAfoIUDf3g/Ufo7s78vBoXOD0fc4GptfG2eDQmIfD2aB8bczBEVHV+Dna5XfRP44Zj2I52CMuahsrR7usNl6O1q02Xo6/q42Xg9eFOKKXg8cXiBzx5UD22NGObk8HmR072lF/gTNyNDrHjXXQCQ4yO3Z2EJ3iILNjZgeNrSsctOioo6gTHDPqaGeHDwf9rCNNB7dbnYfD0UHbHfSM59CjjtY7+HVoWh7x4LscPKOjzg6SOmjb9oLaF6jt4DnqaJODxA5a7SDxPLTSUeUOOm/bL9C27Q9o2/YHtG3/B2rb/oa2bbMj1kFYB0sd0Q4SO6IdJHZEO0jqCHeQ1BHtoA9ylNTRxDpI6hhiHTTZUcUOmuwIdhDrIKmDWAdJHcQ6SOoYYx0kdTSxDpI6hlgHzXZUsYPmOIIdxDpI6iDWQVIHsQ6SOsZYB0kdTayDpI4h1kF3+XlsYB0kdRDrIKmDpA5iHSR1EBvWpA5iQ5TUQUIHCR0kdBjHvwAAAP//m1pNlCv43RMAAAAASUVORK5CYII=");
+                                Log.d(TAG, "Using placeholder icon for " + packageName + " from events");
+                            }
+                        } catch (Exception e) {
+                            // Use a fallback placeholder on error
+                            appData.put("icon", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAJAAAACQBAMAAAAVaP+LAAAAHlBMVEX///8AAABSUlL09PSjo6M7OzshISGDg4O3t7dpaWmZfZ3LAAABzUlEQVRo3u3aS27kIBTG8XAMS2KP7Ygu+yTsf0UjRVGUDlWBn47a/6+EeHwfsK/NbbmzrjsoQIAAAQIECBAgQIAAAQIECBAgQIAAAfoIUDf3g/Ufo7s78vBoXOD0fc4GptfG2eDQmIfD2aB8bczBEVHV+Dna5XfRP44Zj2I52CMuahsrR7usNl6O1q02Xo6/q42Xg9eFOKKXg8cXiBzx5UD22NGObk8HmR072lF/gTNyNDrHjXXQCQ4yO3Z2EJ3iILNjZgeNrSsctOioo6gTHDPqaGeHDwf9rCNNB7dbnYfD0UHbHfSM59CjjtY7+HVoWh7x4LscPKOjzg6SOmjb9oLaF6jt4DnqaJODxA5a7SDxPLTSUeUOOm/bL9C27Q9o2/YHtG3/B2rb/oa2bbMj1kFYB0sd0Q4SO6IdJHZEO0jqCHeQ1BHtoA9ylNTRxDpI6hhiHTTZUcUOmuwIdhDrIKmDWAdJHcQ6SOoYYx0kdTSxDpI6hlgHzXZUsYPmOIIdxDpI6iDWQVIHsQ6SOsZYB0kdTayDpI4h1kF3+XlsYB0kdRDrIKmDpA5iHSR1EBvWpA5iQ5TUQUIHCR0kdBjHvwAAAP//m1pNlCv43RMAAAAASUVORK5CYII=");
+                            Log.e(TAG, "Error retrieving icon for " + packageName + " from events: " + e.getMessage());
+                        }
+                    } else {
+                        appData.put("icon", "");
+                    }
+                    
+                    appDataMap.put(packageName, appData);
+                } catch (Exception e) {
+                    Log.e(TAG, "Error processing app from events " + packageName, e);
+                }
+            } else {
+                // Use the maximum time between UsageStats and UsageEvents
+                double currentTime = appData.getDouble("time");
+                if (timeInMinutes > currentTime) {
+                    appData.put("time", timeInMinutes);
+                }
+            }
         }
     }
     
@@ -945,7 +1685,29 @@ public class AppUsageTracker extends Plugin {
         try {
             PackageManager packageManager = context.getPackageManager();
             ApplicationInfo appInfo = packageManager.getApplicationInfo(packageName, 0);
-            return (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+            
+            // Check if it's a system app
+            boolean isSystem = (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
+            
+            // Explicitly include common browsers and mail apps even if they are system apps
+            if (isSystem) {
+                String appNameLower = packageName.toLowerCase();
+                if (appNameLower.contains("browser") || 
+                    appNameLower.contains("chrome") || 
+                    appNameLower.contains("firefox") || 
+                    appNameLower.contains("opera") || 
+                    appNameLower.contains("edge") ||
+                    appNameLower.contains("mail") || 
+                    appNameLower.contains("gmail") || 
+                    appNameLower.contains("outlook") || 
+                    appNameLower.contains("k9") ||
+                    appNameLower.contains("yahoo")) {
+                    // This is a browser or mail app, include it in tracking
+                    return false;
+                }
+            }
+            
+            return isSystem;
         } catch (PackageManager.NameNotFoundException e) {
             return false;
         }
@@ -1013,113 +1775,206 @@ public class AppUsageTracker extends Plugin {
     }
     
     /**
-     * Get the app icon as a Base64 encoded string
+     * Get the app icon as a Base64 encoded string with caching
      */
     private String getAppIconBase64(String packageName) {
+        // If this is a system app that has issues with icon retrieval, return empty string
+        if (packageName == null || packageName.isEmpty()) {
+            return "";
+        }
+        
+        // For debugging purposes, log the package we're trying to get
+        Log.d(TAG, "Getting icon for: " + packageName);
+        
+        try {
+            // For efficiency, check memory cache first
+            String cachedIcon = iconCache.get(packageName);
+            if (cachedIcon != null && !cachedIcon.isEmpty()) {
+                return cachedIcon;
+            }
+            
+            // Generate the icon directly (skip disk cache for now to simplify)
+            String iconBase64 = generateAppIconBase64(packageName);
+            
+            // Only store valid icons in the cache
+            if (iconBase64 != null && !iconBase64.isEmpty()) {
+                // Update memory cache
+                iconCache.put(packageName, iconBase64);
+                
+                // Skip disk caching for now - we'll focus on reliable in-memory cache
+            }
+            
+            return iconBase64;
+        } catch (Exception e) {
+            Log.e(TAG, "Error getting app icon for " + packageName, e);
+            return ""; // Return empty string on error
+        }
+    }
+    
+    /**
+     * Generate app icon without caching (original implementation)
+     */
+    private String generateAppIconBase64(String packageName) {
         try {
             PackageManager packageManager = getContext().getPackageManager();
+            ApplicationInfo appInfo = null;
             
-            // First check if we have permission to access app info
-            if (!hasAppInfoPermission()) {
-                Log.w(TAG, "No permission to access app info, skipping icon for " + packageName);
-                return "";
-            }
-            
-            // First try to get the application info
-            ApplicationInfo appInfo;
             try {
-                appInfo = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA);
-            } catch (PackageManager.NameNotFoundException e) {
-                Log.w(TAG, "Package not found when getting icon for " + packageName + ", skipping icon");
-                return "";
-            }
-            
-            // Try to get the app icon
-            android.graphics.drawable.Drawable icon;
-            try {
-                // First try to get the adaptive icon (Android 8.0+)
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    try {
-                        android.graphics.drawable.AdaptiveIconDrawable adaptiveIcon = 
-                            (android.graphics.drawable.AdaptiveIconDrawable) packageManager.getApplicationIcon(appInfo);
-                        if (adaptiveIcon != null) {
-                            android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(
-                                192, 192, android.graphics.Bitmap.Config.ARGB_8888);
-                            android.graphics.Canvas canvas = new android.graphics.Canvas(bitmap);
-                            adaptiveIcon.setBounds(0, 0, 192, 192);
-                            adaptiveIcon.draw(canvas);
-                            return bitmapToBase64(bitmap);
-                        }
-                    } catch (Exception e) {
-                        Log.d(TAG, "Adaptive icon not available for " + packageName + ", trying regular icon");
-                    }
-                }
-                
-                // Try to get the icon from the app's resources
-                try {
-                    icon = packageManager.getApplicationIcon(appInfo);
-                } catch (Exception e) {
-                    Log.d(TAG, "Failed to get application icon, trying activity icon for " + packageName);
-                    // Try to get the activity icon as fallback
-                    android.content.pm.ActivityInfo[] activities = packageManager.getPackageInfo(
-                        packageName, PackageManager.GET_ACTIVITIES).activities;
-                    if (activities != null && activities.length > 0) {
-                        icon = activities[0].loadIcon(packageManager);
-                    } else {
-                        throw e;
-                    }
-                }
+                // Get application info with required flags
+                appInfo = packageManager.getApplicationInfo(packageName, 0);
             } catch (Exception e) {
-                Log.w(TAG, "Failed to get any icon for " + packageName + ", skipping icon");
+                Log.w(TAG, "Package not found: " + packageName, e);
                 return "";
             }
             
-            // Create a bitmap from the drawable
-            android.graphics.Bitmap bitmap;
-            
-            if (icon instanceof android.graphics.drawable.BitmapDrawable) {
-                bitmap = ((android.graphics.drawable.BitmapDrawable) icon).getBitmap();
-            } else {
-                // Create a new bitmap and draw the icon onto it
-                int width = Math.max(icon.getIntrinsicWidth(), 1);
-                int height = Math.max(icon.getIntrinsicHeight(), 1);
-                
-                bitmap = android.graphics.Bitmap.createBitmap(
-                    width,
-                    height,
-                    android.graphics.Bitmap.Config.ARGB_8888
-                );
-                android.graphics.Canvas canvas = new android.graphics.Canvas(bitmap);
-                icon.setBounds(0, 0, canvas.getWidth(), canvas.getHeight());
-                icon.draw(canvas);
+            // Get drawable icon directly - simpler and more reliable
+            android.graphics.drawable.Drawable icon = appInfo.loadIcon(packageManager);
+            if (icon == null) {
+                Log.w(TAG, "Icon is null for " + packageName);
+                return "";
             }
             
-            // Scale the bitmap to a reasonable size
-            android.graphics.Bitmap scaledBitmap = android.graphics.Bitmap.createScaledBitmap(
-                bitmap, 192, 192, true);
+            // Create a bitmap with fixed size to ensure consistency
+            android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(144, 144, 
+                    android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas canvas = new android.graphics.Canvas(bitmap);
             
-            return bitmapToBase64(scaledBitmap);
+            // Set background to transparent
+            canvas.drawColor(android.graphics.Color.TRANSPARENT);
             
+            // Scale the icon to fit
+            icon.setBounds(0, 0, 144, 144);
+            icon.draw(canvas);
+            
+            return bitmapToBase64(bitmap);
         } catch (Exception e) {
-            Log.w(TAG, "Error getting app icon for " + packageName + ", skipping icon", e);
+            Log.e(TAG, "Error in generateAppIconBase64 for " + packageName, e);
             return "";
         }
     }
-
+    
+    /**
+     * Convert bitmap to Base64 string with optimized compression
+     */
     private String bitmapToBase64(android.graphics.Bitmap bitmap) {
         try {
-            java.io.ByteArrayOutputStream stream = new java.io.ByteArrayOutputStream();
-            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream);
-            byte[] bitmapData = stream.toByteArray();
-            String base64 = android.util.Base64.encodeToString(bitmapData, android.util.Base64.DEFAULT);
+            // Use a ByteArrayOutputStream to store compressed bitmap data
+            java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream();
             
-            // Log success
-            Log.d(TAG, "Successfully converted bitmap to Base64 (size: " + bitmapData.length + " bytes)");
+            // Use PNG format with transparency support
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 90, outputStream);
+            
+            // Get byte array
+            byte[] bitmapData = outputStream.toByteArray();
+            
+            // Convert to Base64 with proper data URL format for React/HTML
+            String base64 = "data:image/png;base64," + android.util.Base64.encodeToString(bitmapData, android.util.Base64.NO_WRAP);
+            
+            // Log success and size for debugging
+            Log.d(TAG, "Generated icon, size: " + (bitmapData.length / 1024) + "KB");
             
             return base64;
         } catch (Exception e) {
             Log.e(TAG, "Error converting bitmap to Base64", e);
             return "";
+        }
+    }
+    
+    /**
+     * Load icon from disk cache
+     */
+    private String loadIconFromDiskCache(String packageName) {
+        try {
+            // Create cache directory if it doesn't exist
+            File cacheDir = new File(getContext().getCacheDir(), ICON_CACHE_DIR);
+            if (!cacheDir.exists()) {
+                return null;
+            }
+            
+            // Create cache file path
+            File cacheFile = new File(cacheDir, packageName.replace(".", "_") + ".txt");
+            if (!cacheFile.exists() || !cacheFile.canRead()) {
+                return null;
+            }
+            
+            // Read the cache file
+            java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.FileReader(cacheFile));
+            String line = reader.readLine();
+            reader.close();
+            
+            return line;
+        } catch (Exception e) {
+            Log.e(TAG, "Error loading icon from disk cache for " + packageName, e);
+            return null;
+        }
+    }
+    
+    /**
+     * Save icon to disk cache
+     */
+    private void saveIconToDiskCache(String packageName, String iconBase64) {
+        try {
+            // Create cache directory if it doesn't exist
+            File cacheDir = new File(getContext().getCacheDir(), ICON_CACHE_DIR);
+            if (!cacheDir.exists()) {
+                cacheDir.mkdirs();
+            }
+            
+            // Create cache file path
+            File cacheFile = new File(cacheDir, packageName.replace(".", "_") + ".txt");
+            
+            // Write the cache file
+            java.io.FileWriter writer = new java.io.FileWriter(cacheFile);
+            writer.write(iconBase64);
+            writer.close();
+            
+            Log.d(TAG, "Saved icon to disk cache for " + packageName);
+        } catch (Exception e) {
+            Log.e(TAG, "Error saving icon to disk cache for " + packageName, e);
+        }
+    }
+    
+    /**
+     * Clean up cache if needed
+     */
+    private void cleanupCacheIfNeeded() {
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - iconCacheLastCleanup > CACHE_CLEANUP_INTERVAL) {
+            // Update the last cleanup time
+            iconCacheLastCleanup = currentTime;
+            
+            // Run cleanup on a background thread
+            backgroundExecutor.execute(() -> {
+                try {
+                    // Create cache directory if it doesn't exist
+                    File cacheDir = new File(getContext().getCacheDir(), ICON_CACHE_DIR);
+                    if (!cacheDir.exists()) {
+                        return;
+                    }
+                    
+                    // Get all cache files
+                    File[] cacheFiles = cacheDir.listFiles();
+                    if (cacheFiles == null || cacheFiles.length == 0) {
+                        return;
+                    }
+                    
+                    // Delete older files if we have too many (keep 100 most recent)
+                    if (cacheFiles.length > 100) {
+                        // Sort by last modified time
+                        java.util.Arrays.sort(cacheFiles, (f1, f2) -> 
+                            Long.compare(f2.lastModified(), f1.lastModified()));
+                        
+                        // Delete older files
+                        for (int i = 100; i < cacheFiles.length; i++) {
+                            cacheFiles[i].delete();
+                        }
+                        
+                        Log.d(TAG, "Cleaned up icon cache, kept 100 most recent icons");
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Error cleaning up icon cache", e);
+                }
+            });
         }
     }
 
@@ -1342,14 +2197,15 @@ public class AppUsageTracker extends Plugin {
     public void setNotificationFrequency(PluginCall call) {
         synchronized (settingsLock) {
             try {
-                int frequencyMinutes = call.getInt("frequencyMinutes", (int) DEFAULT_NOTIFICATION_FREQUENCY);
+                int frequency = call.getInt("frequency", (int) DEFAULT_NOTIFICATION_FREQUENCY);
                 String newChainId = "SETTINGS_CHAIN_" + System.currentTimeMillis();
                 String currentChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
                 
-                Log.d(TAG, String.format("[%s] User setting notification frequency to: %d minutes", newChainId, frequencyMinutes));
+                Log.d(TAG, String.format("[%s] User setting notification frequency to: %d minutes", newChainId, frequency));
                 Log.d(TAG, String.format("[%s] - Current chain ID: %s", newChainId, currentChainId));
                 Log.d(TAG, String.format("[%s] - Current notification frequency: %d minutes", newChainId, 
                     prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY)));
+                Log.d(TAG, String.format("[%s] - Raw value from UI: %s", newChainId, call.getData().toString()));
                 
                 // Only update if the new chain ID is newer than the current one
                 if (newChainId.compareTo(currentChainId) > 0) {
@@ -1357,7 +2213,7 @@ public class AppUsageTracker extends Plugin {
                     long currentLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
                     
                     // Update settings through our synchronized method
-                    updateSettings(newChainId, currentLimit, frequencyMinutes);
+                    updateSettings(newChainId, currentLimit, frequency);
                     
                     // Update widget immediately
                     Intent updateIntent = new Intent(getContext(), ScreenTimeWidgetProvider.class);
@@ -1384,30 +2240,6 @@ public class AppUsageTracker extends Plugin {
                 Log.e(TAG, "Error setting notification frequency", e);
                 call.reject("Error setting notification frequency: " + e.getMessage());
             }
-        }
-    }
-
-    private void broadcastUsageData(Context context) {
-        try {
-            // Get the stored values directly from SharedPreferences
-            SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            float totalScreenTime = getSafeScreenTime(prefs);
-            long screenTimeLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-
-            // Create JSON object with the data
-            JSONObject data = new JSONObject();
-            data.put("totalScreenTime", totalScreenTime);
-            data.put("screenTimeLimit", screenTimeLimit);
-            data.put("timestamp", System.currentTimeMillis());
-
-            // Broadcast to any listening components
-            Intent intent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
-            intent.putExtra("usageData", data.toString());
-            context.sendBroadcast(intent);
-            
-            Log.d(TAG, "Broadcasting usage data: " + data.toString());
-        } catch (Exception e) {
-            Log.e(TAG, "Error broadcasting usage data", e);
         }
     }
 
@@ -2112,94 +2944,115 @@ public class AppUsageTracker extends Plugin {
 
     // Add a method to safely update settings
     private void updateSettings(String chainId, long screenTimeLimit, long notificationFrequency) {
-        try {
-            synchronized (settingsLock) {
-                // First read current values
-                String currentChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
+        synchronized (settingsLock) {
+            try {
+                SharedPreferences prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+                SharedPreferences.Editor editor = prefs.edit();
+                
+                // Get current values before making changes
                 long currentLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
                 long currentFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
+                String currentChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
                 
-                Log.d(TAG, String.format("[%s] Current settings before update:", chainId));
+                Log.d(TAG, String.format("[%s] Updating settings - Current values:", chainId));
                 Log.d(TAG, String.format("[%s] - Current chain ID: %s", chainId, currentChainId));
                 Log.d(TAG, String.format("[%s] - Current screen time limit: %d minutes", chainId, currentLimit));
                 Log.d(TAG, String.format("[%s] - Current notification frequency: %d minutes", chainId, currentFrequency));
+                Log.d(TAG, String.format("[%s] - New screen time limit: %d minutes", chainId, screenTimeLimit));
+                Log.d(TAG, String.format("[%s] - New notification frequency: %d minutes", chainId, notificationFrequency));
                 
-                // Only update if new chain ID is newer
-                if (chainId.compareTo(currentChainId) > 0) {
-                    // Obtain a class-level lock for cross-process synchronization
-                    synchronized (AppUsageTracker.class) {
-                        // Double-check the chain ID after getting the lock
-                        String verifiedChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
-                        if (chainId.compareTo(verifiedChainId) > 0) {
-                            SharedPreferences.Editor editor = prefs.edit();
-                            
-                            // Update all settings atomically
-                            editor.putLong(KEY_SCREEN_TIME_LIMIT, screenTimeLimit);
-                            editor.putLong(KEY_NOTIFICATION_FREQUENCY, notificationFrequency);
-                            editor.putString("lastSettingsChainId", chainId);
-                            editor.putBoolean("userHasSetLimit", true);
-                            
-                            // Commit changes synchronously to ensure they are saved before proceeding
-                            boolean success = editor.commit();
-                            
-                            // Verify the changes
-                            long savedLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
-                            long savedFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
-                            String savedChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
-                            
-                            Log.d(TAG, String.format("[%s] Settings updated - New values (commit success: %b):", chainId, success));
-                            Log.d(TAG, String.format("[%s] - New screen time limit: %d minutes", chainId, savedLimit));
-                            Log.d(TAG, String.format("[%s] - New notification frequency: %d minutes", chainId, savedFrequency));
-                            Log.d(TAG, String.format("[%s] - New chain ID: %s", chainId, savedChainId));
-                            
-                            // Broadcast update to other processes with all settings
-                            Intent broadcastIntent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
-                            JSONObject updateData = new JSONObject();
-                            updateData.put("chainId", chainId);
-                            updateData.put("screenTimeLimit", screenTimeLimit);
-                            updateData.put("notificationFrequency", notificationFrequency);
-                            updateData.put("timestamp", System.currentTimeMillis());
-                            updateData.put("action", "UPDATE_SETTINGS");
-                            broadcastIntent.putExtra("usageData", updateData.toString());
-                            
-                            Log.d(TAG, String.format("[%s] Broadcasting settings update to other processes:", chainId));
-                            Log.d(TAG, String.format("[%s] - Screen time limit: %d minutes", chainId, screenTimeLimit));
-                            Log.d(TAG, String.format("[%s] - Notification frequency: %d minutes", chainId, notificationFrequency));
-                            
-                            // Send broadcast with high priority to ensure immediate delivery
-                            context.sendOrderedBroadcast(broadcastIntent, null);
-                            
-                            // Force an immediate check with new settings
-                            float totalTime = calculateScreenTime(context);
-                            checkScreenTimeLimitStatic(context, Math.round(totalTime), (int)notificationFrequency);
-                            
-                            // Update widget with new values
-                            Intent updateIntent = new Intent(context, ScreenTimeWidgetProvider.class);
-                            updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
-                            int[] ids = AppWidgetManager.getInstance(context)
-                                .getAppWidgetIds(new ComponentName(context, ScreenTimeWidgetProvider.class));
-                            updateIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
-                            updateIntent.putExtra("totalScreenTime", totalTime);
-                            updateIntent.putExtra("screenTimeLimit", screenTimeLimit);
-                            context.sendBroadcast(updateIntent);
-                            
-                            // Notify web listeners
-                            JSObject ret = new JSObject();
-                            ret.put("screenTimeLimit", screenTimeLimit);
-                            ret.put("notificationFrequency", notificationFrequency);
-                            notifyListeners("settingsUpdated", ret);
-                        } else {
-                            Log.d(TAG, String.format("[%s] Aborting update - after lock, chain ID (%s) is newer", 
-                                chainId, verifiedChainId));
-                        }
+                // Always update the chain ID to mark the latest change
+                editor.putString("lastSettingsChainId", chainId);
+                
+                // Update values if they've changed
+                if (screenTimeLimit != currentLimit) {
+                    editor.putLong(KEY_SCREEN_TIME_LIMIT, screenTimeLimit);
+                    Log.d(TAG, String.format("[%s] Screen time limit updated: %d -> %d minutes", 
+                        chainId, currentLimit, screenTimeLimit));
+                }
+                
+                if (notificationFrequency != currentFrequency) {
+                    editor.putLong(KEY_NOTIFICATION_FREQUENCY, notificationFrequency);
+                    Log.d(TAG, String.format("[%s] Notification frequency updated: %d -> %d minutes", 
+                        chainId, currentFrequency, notificationFrequency));
+                }
+                
+                // Set the user-defined flag to prevent default values from being applied
+                editor.putBoolean("userHasSetLimit", true);
+                
+                // Apply changes immediately
+                boolean success = editor.commit();
+                
+                if (success) {
+                    Log.d(TAG, String.format("[%s] Settings committed successfully", chainId));
+                    
+                    // IMPORTANT: Broadcast the settings change to ensure cross-process consistency
+                    try {
+                        // Create a broadcast to update all processes with the new settings
+                        JSONObject settingsData = new JSONObject();
+                        settingsData.put("chainId", chainId);
+                        settingsData.put("action", "UPDATE_SETTINGS");
+                        settingsData.put("screenTimeLimit", screenTimeLimit);
+                        settingsData.put("notificationFrequency", notificationFrequency);
+                        settingsData.put("timestamp", System.currentTimeMillis());
+                        
+                        // Broadcast to update widget and background service
+                        Intent updateIntent = new Intent(ACTION_USAGE_UPDATE);
+                        updateIntent.putExtra("usageData", settingsData.toString());
+                        context.sendBroadcast(updateIntent);
+                        
+                        // Also explicitly update the widget
+                        Intent widgetIntent = new Intent(context, ScreenTimeWidgetProvider.class);
+                        widgetIntent.setAction(AppWidgetManager.ACTION_APPWIDGET_UPDATE);
+                        int[] ids = AppWidgetManager.getInstance(context)
+                            .getAppWidgetIds(new ComponentName(context, ScreenTimeWidgetProvider.class));
+                        widgetIntent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids);
+                        widgetIntent.putExtra("totalScreenTime", calculateScreenTime(context));
+                        widgetIntent.putExtra("screenTimeLimit", screenTimeLimit);
+                        context.sendBroadcast(widgetIntent);
+                        
+                        Log.d(TAG, String.format("[%s] Settings change broadcast sent successfully", chainId));
+                    } catch (Exception e) {
+                        Log.e(TAG, String.format("[%s] Error broadcasting settings change: %s", 
+                            chainId, e.getMessage()), e);
                     }
                 } else {
-                    Log.d(TAG, String.format("[%s] Skipping update - current chain ID (%s) is newer", 
-                        chainId, currentChainId));
+                    Log.e(TAG, String.format("[%s] Failed to commit settings changes", chainId));
                 }
+                
+                // Verify the changes
+                verifySettingsChanges(prefs, chainId, screenTimeLimit, notificationFrequency);
+            } catch (Exception e) {
+                Log.e(TAG, String.format("[%s] Error updating settings: %s", chainId, e.getMessage()));
             }
+        }
+    }
+
+    private void verifySettingsChanges(SharedPreferences prefs, String chainId, long screenTimeLimit, long notificationFrequency) {
+        try {
+            // Read back the values to verify they were saved correctly
+            long savedLimit = prefs.getLong(KEY_SCREEN_TIME_LIMIT, DEFAULT_SCREEN_TIME_LIMIT);
+            long savedFrequency = prefs.getLong(KEY_NOTIFICATION_FREQUENCY, DEFAULT_NOTIFICATION_FREQUENCY);
+            String savedChainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
+            boolean userHasSetLimit = prefs.getBoolean("userHasSetLimit", false);
+            
+            boolean allMatch = savedLimit == screenTimeLimit && 
+                              savedFrequency == notificationFrequency && 
+                              savedChainId.equals(chainId) &&
+                              userHasSetLimit;
+            
+            if (allMatch) {
+                Log.d(TAG, String.format("[%s] Settings verification successful - All values match:", chainId));
+            } else {
+                Log.e(TAG, String.format("[%s] Settings verification failed - Values don't match:", chainId));
+            }
+            
+            Log.d(TAG, String.format("[%s] - Verified screen time limit: %d minutes", chainId, savedLimit));
+            Log.d(TAG, String.format("[%s] - Verified notification frequency: %d minutes", chainId, savedFrequency));
+            Log.d(TAG, String.format("[%s] - Verified chain ID: %s", chainId, savedChainId));
+            Log.d(TAG, String.format("[%s] - Verified user has set limit: %s", chainId, userHasSetLimit));
         } catch (Exception e) {
-            Log.e(TAG, String.format("[%s] Error updating settings", chainId), e);
+            Log.e(TAG, String.format("[%s] Error verifying settings: %s", chainId, e.getMessage()));
         }
     }
 

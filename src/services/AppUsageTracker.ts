@@ -464,7 +464,7 @@ export default class AppUsageTrackerService {
       return result.value;
     } catch (error) {
       console.error('Error getting notification frequency:', error);
-      return 15; // Default to 15 minutes
+      return 5; // Default to 5 minutes to match AppUsageTracker.DEFAULT_NOTIFICATION_FREQUENCY
     }
   }
 

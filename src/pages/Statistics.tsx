@@ -399,7 +399,7 @@ const Statistics = () => {
                                 fill="#FFFFFF"
                               />
                               <image
-                                xlinkHref={`data:image/png;base64,${payload.icon}`}
+                                xlinkHref={payload.icon}
                                 x={x + width / 2 - 16}
                                 y={y - 36}
                                 width={32}

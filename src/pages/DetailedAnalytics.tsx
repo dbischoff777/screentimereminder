@@ -789,14 +789,14 @@ const DetailedAnalytics = () => {
                         <div style={{
                           position: 'relative',
                           zIndex: 2,
-                          background: '#FFFFFF',
+                          background: 'transparent',
                           borderRadius: '50%',
                           padding: '2px',
                           marginRight: '16px'
                         }}>
                           {instance.appIcon ? (
                             <img
-                              src={`data:image/png;base64,${instance.appIcon}`}
+                              src={instance.appIcon}
                               alt={instance.appName}
                               style={{
                                 width: '32px',
@@ -958,7 +958,7 @@ const DetailedAnalytics = () => {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
                         {mostUsedApp.icon ? (
                           <img
-                            src={`data:image/png;base64,${mostUsedApp.icon}`}
+                            src={mostUsedApp.icon}
                             alt={mostUsedApp.name}
                             style={{
                               width: '32px',
@@ -1122,7 +1122,7 @@ const DetailedAnalytics = () => {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
                       {app.icon ? (
                         <img
-                          src={`data:image/png;base64,${app.icon}`}
+                          src={app.icon}
                           alt={app.name}
                           style={{
                             width: '48px',

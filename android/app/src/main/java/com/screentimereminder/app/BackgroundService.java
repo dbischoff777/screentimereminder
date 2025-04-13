@@ -118,10 +118,10 @@ public class BackgroundService extends Service {
             if (intent.hasExtra("usageData")) {
                 String usageData = intent.getStringExtra("usageData");
                 try {
-                    // Simply forward the update to AppUsageTracker
+                    // Simply forward all updates to AppUsageTracker
                     AppUsageTracker.getInstance(context).handleUsageUpdate(usageData);
                 } catch (Exception e) {
-                    Log.e(TAG, "Error processing usage update", e);
+                    Log.e(TAG, "Error forwarding usage update to AppUsageTracker", e);
                 }
             }
         }
@@ -156,6 +156,15 @@ public class BackgroundService extends Service {
                 registerReceiver(packageUpdateReceiver, packageFilter);
             }
 
+            // Register for usage updates
+            IntentFilter usageFilter = new IntentFilter();
+            usageFilter.addAction("com.screentimereminder.app.APP_USAGE_UPDATE");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(usageUpdateReceiver, usageFilter, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                registerReceiver(usageUpdateReceiver, usageFilter);
+            }
+
             // Set up alarm manager for service restart
             alarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
             Intent intent = new Intent(this, BackgroundService.class);
@@ -169,22 +178,18 @@ public class BackgroundService extends Service {
             mainHandler = new Handler(Looper.getMainLooper());
             startTime = System.currentTimeMillis();
             isRunning = true;
-            usageStatsManager = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
             
             // Set up the update runnable
             updateRunnable = new Runnable() {
                 @Override
                 public void run() {
                     try {
-                        Log.d(TAG, "Starting background update cycle");
-                        updateAppUsage();
-                        // Schedule next update
                         if (isRunning) {
+                            updateAppUsage();
                             mainHandler.postDelayed(this, UPDATE_INTERVAL);
                         }
                     } catch (Exception e) {
                         Log.e(TAG, "Error in background update cycle", e);
-                        // Retry after a shorter interval if there's an error
                         if (isRunning) {
                             mainHandler.postDelayed(this, 30000);
                         }
@@ -195,7 +200,7 @@ public class BackgroundService extends Service {
             // Start the update runnable
             mainHandler.post(updateRunnable);
             
-            // Set up the watchdog runnable with improved error handling
+            // Set up the watchdog runnable
             watchdogRunnable = new Runnable() {
                 @Override
                 public void run() {
@@ -206,11 +211,6 @@ public class BackgroundService extends Service {
                             return;
                         }
                         
-                        Log.d(TAG, "Watchdog: Service is alive - " + new Date().toString());
-                        // Verify background updates are working
-                        verifyBackgroundUpdates();
-                        
-                        // Schedule next watchdog check if still running
                         if (isRunning) {
                             mainHandler.postDelayed(this, WATCHDOG_INTERVAL);
                         }
@@ -226,7 +226,7 @@ public class BackgroundService extends Service {
             // Start the watchdog
             mainHandler.post(watchdogRunnable);
             
-            // Start as foreground service with high priority
+            // Start as foreground service
             startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, createHighPriorityNotification());
             
             // Acquire partial wake lock
@@ -239,13 +239,7 @@ public class BackgroundService extends Service {
                 wakeLock.acquire();
             }
 
-            // Schedule periodic updates
-            startPeriodicUpdates();
-
-            // Set up watchdog
-            setupWatchdog();
-
-            // Schedule periodic service check using AlarmManager as backup
+            // Schedule service restart alarm
             scheduleServiceRestartAlarm();
 
         } catch (Exception e) {
@@ -264,6 +258,7 @@ public class BackgroundService extends Service {
             try {
                 unregisterReceiver(packageUpdateReceiver);
                 unregisterReceiver(restartReceiver);
+                unregisterReceiver(usageUpdateReceiver);
             } catch (Exception e) {
                 Log.e(TAG, "Error unregistering receivers", e);
             }
@@ -297,22 +292,20 @@ public class BackgroundService extends Service {
 
     private void updateAppUsage() {
         try {
-            // Get current screen time using AppUsageTracker's method for consistency
-            float totalTime = AppUsageTracker.calculateScreenTime(this);
+            long currentTime = System.currentTimeMillis();
+            long elapsedTime = currentTime - startTime;
             
-            // Get latest chain ID from settings update
-            SharedPreferences prefs = getSharedPreferences(AppUsageTracker.PREFS_NAME, Context.MODE_PRIVATE);
-            String chainId = prefs.getString("lastSettingsChainId", "NO_CHAIN_ID");
-            
-            // Use AppUsageTracker to check screen time limit and handle notifications
-            AppUsageTracker.checkScreenTimeLimitStatic(this, Math.round(totalTime), AppUsageTracker.getNotificationFrequencyStatic(this));
-            
-            Log.d(TAG, String.format("[%s] Starting background service update - Current values:", chainId));
-            Log.d(TAG, String.format("[%s] - Total screen time: %.2f minutes", chainId, totalTime));
+            // Only log every 5 minutes to reduce noise
+            if (elapsedTime > 300000) {
+                Log.d(TAG, "Service running for " + (elapsedTime / 1000 / 60) + " minutes");
+                startTime = currentTime;
+            }
 
-            // Let AppUsageTracker handle widget updates (removed the direct widget update from here)
-
-            Log.d(TAG, String.format("[%s] Completed background service update", chainId));
+            // Calculate current screen time and check limit
+            float totalTime = AppUsageTracker.calculateScreenTime(getApplicationContext());
+            AppUsageTracker.checkScreenTimeLimitStatic(getApplicationContext(), Math.round(totalTime), 
+                AppUsageTracker.getNotificationFrequencyStatic(getApplicationContext()));
+            
         } catch (Exception e) {
             Log.e(TAG, "Error updating app usage", e);
         }
@@ -543,12 +536,6 @@ public class BackgroundService extends Service {
         return "Uncategorized";
     }
 
-    private String getAppIconBase64(String packageName) {
-        // Implement the logic to get the base64 representation of the app icon
-        // This is a placeholder and should be replaced with the actual implementation
-        return "";
-    }
-
     private void restartService() {
         try {
             Log.d(TAG, "Attempting to restart service");
@@ -612,7 +599,7 @@ public class BackgroundService extends Service {
                         // Get fresh values each time
                         SharedPreferences currentPrefs = getSharedPreferences(AppUsageTracker.PREFS_NAME, Context.MODE_PRIVATE);
                         long currentLimit = currentPrefs.getLong(AppUsageTracker.KEY_SCREEN_TIME_LIMIT, AppUsageTracker.DEFAULT_SCREEN_TIME_LIMIT);
-                        long currentFrequency = currentPrefs.getLong(AppUsageTracker.KEY_NOTIFICATION_FREQUENCY, 5L);
+                        long currentFrequency = currentPrefs.getLong(AppUsageTracker.KEY_NOTIFICATION_FREQUENCY, AppUsageTracker.DEFAULT_NOTIFICATION_FREQUENCY);
                         
                         Log.d(TAG, "Periodic update with current values - Frequency: " + currentFrequency + 
                               " minutes, Limit: " + currentLimit + " minutes");

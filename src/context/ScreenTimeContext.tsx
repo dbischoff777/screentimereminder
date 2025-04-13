@@ -79,7 +79,7 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
 
   const [notificationFrequency, setNotificationFrequency] = useState<number>(() => {
     const saved = localStorage.getItem('notificationFrequency');
-    return saved ? parseInt(saved, 10) : 15; // Default 15 minutes
+    return saved ? parseInt(saved, 10) : 5; // Default 5 minutes to match AppUsageTracker.DEFAULT_NOTIFICATION_FREQUENCY
   });
 
   // Usage access permission setting
@@ -172,6 +172,9 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     // Only update if the frequency is actually different
     if (frequency !== notificationFrequency) {
       console.log('ScreenTimeContext: Setting notification frequency from:', notificationFrequency, 'to:', frequency);
+      console.log('ScreenTimeContext: Raw params:', JSON.stringify(params));
+      
+      // Update local state first
       setNotificationFrequency(frequency);
       
       // Sync with native code
@@ -179,6 +182,13 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
       appUsageTracker.setNotificationFrequency({ frequency })
         .then(() => {
           console.log('ScreenTimeContext: Successfully synced notification frequency with native code:', frequency);
+          // Verify the value was saved
+          appUsageTracker.getNotificationFrequency().then(savedFrequency => {
+            console.log('ScreenTimeContext: Verified saved frequency:', savedFrequency);
+            if (savedFrequency !== frequency) {
+              console.warn('ScreenTimeContext: Frequency mismatch - Expected:', frequency, 'Got:', savedFrequency);
+            }
+          });
         })
         .catch(error => {
           console.error('Error syncing notification frequency with native code:', error);
