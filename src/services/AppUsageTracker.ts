@@ -1,4 +1,6 @@
 import { registerPlugin } from '@capacitor/core';
+import { AppUsageTrackerPlugin } from './definitions';
+import { SettingsConstants } from '../constants/SettingsConstants';
 
 // Use the existing AppUsage interface from ScreenTimeContext
 // This is just for reference - we'll import the actual interface
@@ -10,41 +12,6 @@ export interface AppUsage {
   category: string;
   isActive?: boolean;
   icon?: string; // Base64 encoded app icon
-}
-
-// Define the interface for our AppUsageTracker plugin
-export interface AppUsageTrackerPlugin {
-  hasUsagePermission(): Promise<{ value: boolean }>;
-  requestUsagePermission(): Promise<void>;
-  startTracking(): Promise<{ value: boolean }>;
-  stopTracking(): Promise<{ value: boolean }>;
-  getAppUsageData(options?: { startTime?: number; endTime?: number }): Promise<{ data: string }>;
-  addListener(
-    eventName: 'appChanged',
-    listenerFunc: (data: { packageName: string; appName: string }) => void
-  ): Promise<{ remove: () => void }>;
-  addListener(
-    eventName: 'usageUpdate',
-    listenerFunc: (data: { usageData: string }) => void
-  ): Promise<{ remove: () => void }>;
-  removeAllListeners(): Promise<void>;
-  isBatteryOptimizationExempt(): Promise<{ value: boolean }>;
-  requestBatteryOptimizationExemption(): Promise<void>;
-  checkScreenTimeLimit(params: {
-    totalTime: number;
-    limit: number;
-    notificationFrequency: number;
-  }): Promise<void>;
-  getSharedPreferences(): Promise<{
-    lastLimitReachedNotification: number;
-    lastApproachingLimitNotification: number;
-    screenTimeLimit: number;
-    notificationFrequency: number;
-    totalScreenTime: number;
-  }>;
-  setScreenTimeLimit(params: { limitMinutes: number }): Promise<void>;
-  setNotificationFrequency(params: { frequency: number }): Promise<void>;
-  getScreenTimeLimit(): Promise<{ value: number }>;
 }
 
 // Register the AppUsageTracker plugin
@@ -418,12 +385,12 @@ export default class AppUsageTrackerService {
       return result;
     } catch (error) {
       console.error('Error getting shared preferences:', error);
-      // Return default values if there's an error
+      // Return default values from SettingsConstants
       return {
         lastLimitReachedNotification: 0,
         lastApproachingLimitNotification: 0,
-        screenTimeLimit: 120, // Default 2 hours
-        notificationFrequency: 15, // Default 15 minutes
+        screenTimeLimit: SettingsConstants.DEFAULT_SCREEN_TIME_LIMIT,
+        notificationFrequency: SettingsConstants.DEFAULT_NOTIFICATION_FREQUENCY,
         totalScreenTime: 0
       };
     }
@@ -464,7 +431,7 @@ export default class AppUsageTrackerService {
       return result.value;
     } catch (error) {
       console.error('Error getting notification frequency:', error);
-      return 5; // Default to 5 minutes to match AppUsageTracker.DEFAULT_NOTIFICATION_FREQUENCY
+      return SettingsConstants.DEFAULT_NOTIFICATION_FREQUENCY; // Default to 5 minutes
     }
   }
 
@@ -479,7 +446,7 @@ export default class AppUsageTrackerService {
       return result.value;
     } catch (error) {
       console.error('Error getting screen time limit:', error);
-      return 30; // Default to 30 minutes
+      return SettingsConstants.MIN_SCREEN_TIME_LIMIT; // Default to minimum screen time limit
     }
   }
 

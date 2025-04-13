@@ -3,8 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect } from 'react';
 import AppUsageTracker from '../services/AppUsageTracker';
-import { FiAlertCircle, FiCheckCircle, FiBarChart2 } from 'react-icons/fi';
+import { FiAlertCircle, FiCheckCircle } from 'react-icons/fi';
 import CustomDropdown from '../components/CustomDropdown';
+import { SettingsConstants } from '../constants/SettingsConstants';
 
 // Add type declaration for Capacitor on window object if not already defined
 declare global {
@@ -37,24 +38,21 @@ const Settings = () => {
   // Get the tracker service instance
   const trackerService = AppUsageTracker.getInstance();
 
-  // Check if running on mobile and initialize permission states
+  // Initialize permission states
   useEffect(() => {
-    // Initialize permission states
     setPreviousNotificationState(notificationsEnabled);
     setPreviousUsageAccessState(usageAccessEnabled);
-    
-    // Check usage access permission
     checkUsagePermission();
   }, [notificationsEnabled, usageAccessEnabled, setUsageAccessEnabled]);
 
-  // Set up an interval to check permission status periodically when requesting
+  // Set up permission check interval
   useEffect(() => {
     let intervalId: NodeJS.Timeout | null = null;
     
     if (isRequestingPermission) {
       intervalId = setInterval(() => {
         checkUsagePermission();
-      }, 3000); // Check every 3 seconds
+      }, SettingsConstants.PERMISSION_CHECK_INTERVAL);
     }
     
     return () => {
@@ -67,15 +65,12 @@ const Settings = () => {
     try {
       setIsCheckingPermission(true);
       const hasPermission = await trackerService.hasUsagePermission();
-      console.log('Usage access permission status:', hasPermission);
       setPermissionStatus(hasPermission);
       
-      // Only update if different from current state
       if (hasPermission !== usageAccessEnabled) {
         setUsageAccessEnabled(hasPermission);
       }
       
-      // If we were requesting permission and now have it, stop requesting
       if (isRequestingPermission && hasPermission) {
         setIsRequestingPermission(false);
       }
@@ -91,11 +86,7 @@ const Settings = () => {
   const requestUsagePermission = async () => {
     try {
       setIsRequestingPermission(true);
-      console.log('Requesting usage access permission...');
       await trackerService.requestUsagePermission();
-      console.log('Usage access permission request sent');
-      
-      // We'll check the permission status in the interval
     } catch (error) {
       console.error('Error requesting usage access permission:', error);
       setIsRequestingPermission(false);
@@ -103,37 +94,23 @@ const Settings = () => {
   };
 
   const handleSaveSettings = async () => {
-    console.log('Save Settings clicked. Notification state:', notificationsEnabled, 'Previous state:', previousNotificationState);
-    console.log('Current screen time limit:', screenTimeLimit);
-    
-    // Handle notification permissions for mobile devices
-    if (notificationsEnabled) {
+    // Handle notification permissions
+    if (notificationsEnabled && !previousNotificationState) {
       try {
-        // For mobile devices, we need to use Capacitor's LocalNotifications API
-        if (window.Capacitor && window.Capacitor.isNativePlatform()) {
-          console.log('Mobile device detected, checking notification permission with Capacitor');
+        if (window.Capacitor?.isNativePlatform()) {
           const { LocalNotifications } = await import('@capacitor/local-notifications');
-          
-          // Check if we need to request permission
           const permResult = await LocalNotifications.checkPermissions();
-          console.log('Current notification permission status:', permResult.display);
           
-          if (permResult.display !== 'granted' || !previousNotificationState) {
-            console.log('Navigating to notification permission page');
+          if (permResult.display !== 'granted') {
             navigate('/notification-permission');
             return;
           }
-        } else {
-          // Fallback for browser testing
-          if (!previousNotificationState || (Notification && Notification.permission !== 'granted')) {
-            console.log('Navigating to notification permission page (browser fallback)');
-            navigate('/notification-permission');
-            return;
-          }
+        } else if (Notification && Notification.permission !== 'granted') {
+          navigate('/notification-permission');
+          return;
         }
       } catch (error) {
         console.error('Error checking notification permissions:', error);
-        // If there's an error, navigate to permission page to be safe
         navigate('/notification-permission');
         return;
       }
@@ -145,84 +122,85 @@ const Settings = () => {
       return;
     }
     
-    // If we've made it here, all permissions are handled
-    // Show a success message or navigate back to home
-    console.log('Settings saved successfully. New screen time limit:', screenTimeLimit);
-    alert('Settings saved successfully!');
-    navigate('/');
+    try {
+      // Update settings in AppUsageTracker
+      await trackerService.setScreenTimeLimit(screenTimeLimit);
+      await trackerService.setNotificationFrequency({ frequency: notificationFrequency });
+
+      alert('Settings saved successfully!');
+      navigate('/');
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      alert('Failed to save settings. Please try again.');
+    }
   };
 
+  // Generate screen time limit options
+  const screenTimeLimitOptions = [
+    { value: SettingsConstants.MIN_SCREEN_TIME_LIMIT.toString(), label: '30m' },
+    { value: '60', label: '1h' },
+    { value: '90', label: '1.5h' },
+    { value: '120', label: '2h' },
+    { value: '150', label: '2.5h' },
+    { value: '180', label: '3h' },
+    { value: '210', label: '3.5h' },
+    { value: SettingsConstants.MAX_SCREEN_TIME_LIMIT.toString(), label: '4h' },
+  ];
+
+  // Generate notification frequency options
+  const notificationFrequencyOptions = [
+    { value: SettingsConstants.MIN_NOTIFICATION_FREQUENCY.toString(), label: '5m' },
+    { value: '15', label: '15m' },
+    { value: '30', label: '30m' },
+    { value: '45', label: '45m' },
+    { value: SettingsConstants.MAX_NOTIFICATION_FREQUENCY.toString(), label: '60m' }
+  ];
+
   return (
-    <Container 
-      size="md" 
-      py="xl"
-      style={{
-        background: '#000020', // Dark blue-black background
-        minHeight: '100vh',
-        padding: '1rem'
-      }}
-    >
-      <Title
-        order={1}
-        style={{
-          fontSize: '2rem',
-          marginBottom: '2rem',
-          color: '#00FFFF',
-          textShadow: '0 0 10px #00FFFF',
-          textAlign: 'center',
-        }}
-      >
+    <Container size="md" py="xl" style={{ background: '#000020', minHeight: '100vh', padding: '1rem' }}>
+      <Title order={1} style={{
+        fontSize: '2rem',
+        marginBottom: '2rem',
+        color: '#00FFFF',
+        textShadow: '0 0 10px #00FFFF',
+        textAlign: 'center',
+      }}>
         SYSTEM SETTINGS
       </Title>
 
-      <div
-        style={{
-          padding: '2rem',
-          background: 'transparent',
-          borderTop: '1px solid #FF00FF',
-          borderBottom: '1px solid #FF00FF',
-          marginBottom: '2rem',
-        }}
-      >
-        <Title
-          order={3}
-          style={{
-            color: '#FF00FF',
-            marginBottom: '1.5rem',
-            textShadow: '0 0 5px #FF00FF',
-          }}
-        >
+      <div style={{
+        padding: '2rem',
+        background: 'transparent',
+        borderTop: '1px solid #FF00FF',
+        borderBottom: '1px solid #FF00FF',
+        marginBottom: '2rem',
+      }}>
+        <Title order={3} style={{
+          color: '#FF00FF',
+          marginBottom: '1.5rem',
+          textShadow: '0 0 5px #FF00FF',
+        }}>
           Screen Time Configuration
         </Title>
+
         <CustomDropdown
-          options={[
-            { value: '30', label: '30m' },
-            { value: '60', label: '1h' },
-            { value: '90', label: '1.5h' },
-            { value: '120', label: '2h' },
-            { value: '150', label: '2.5h' },
-            { value: '180', label: '3h' },
-            { value: '210', label: '3.5h' },
-            { value: '240', label: '4h' },
-          ]}
+          options={screenTimeLimitOptions}
           value={screenTimeLimit.toString()}
           onChange={(value) => {
             const limitMinutes = typeof value === 'string' ? parseInt(value, 10) : value;
-            console.log('Setting screen time limit to:', limitMinutes);
-            setScreenTimeLimit({ limitMinutes });
+            if (limitMinutes >= SettingsConstants.MIN_SCREEN_TIME_LIMIT && 
+                limitMinutes <= SettingsConstants.MAX_SCREEN_TIME_LIMIT) {
+              setScreenTimeLimit({ limitMinutes });
+            }
           }}
           label="Daily Screen Time Limit"
         />
 
         <Group style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between' }}>
-          <Text style={{ color: '#00FFFF' }}>
-            Enable Notifications
-          </Text>
+          <Text style={{ color: '#00FFFF' }}>Enable Notifications</Text>
           <Switch 
             checked={notificationsEnabled}
-            onChange={(event) => {
-              setNotificationsEnabled(event.currentTarget.checked);
-            }}
+            onChange={(event) => setNotificationsEnabled(event.currentTarget.checked)}
             color="cyan"
             styles={{
               track: {
@@ -236,15 +214,12 @@ const Settings = () => {
         {/* Usage Access Permission Section */}
         <div style={{ marginBottom: '2rem' }}>
           <Group style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <Text style={{ color: '#00FFFF' }}>
-              Enable Usage Access
-            </Text>
+            <Text style={{ color: '#00FFFF' }}>Enable Usage Access</Text>
             <Switch 
               checked={usageAccessEnabled}
               onChange={(event) => {
                 setUsageAccessEnabled(event.currentTarget.checked);
                 if (event.currentTarget.checked && !permissionStatus) {
-                  // If turning on and don't have permission, request it
                   requestUsagePermission();
                 }
               }}
@@ -257,8 +232,8 @@ const Settings = () => {
               }}
             />
           </Group>
-          
-          {/* Permission Status Indicator */}
+
+          {/* Permission Status Indicators */}
           {isCheckingPermission && (
             <div style={{ textAlign: 'center', margin: '1rem 0' }}>
               <Loader color="#00FFFF" size="sm" />
@@ -282,14 +257,12 @@ const Settings = () => {
           )}
           
           {permissionStatus === true && !isCheckingPermission && !isRequestingPermission && (
-            <div
-              style={{
-                padding: '0.5rem',
-                background: 'rgba(0, 255, 0, 0.1)',
-                borderLeft: '4px solid #00FF00',
-                marginTop: '0.5rem',
-              }}
-            >
+            <div style={{
+              padding: '0.5rem',
+              background: 'rgba(0, 255, 0, 0.1)',
+              borderLeft: '4px solid #00FF00',
+              marginTop: '0.5rem',
+            }}>
               <Text size="sm" style={{ color: '#00FF00' }}>
                 <FiCheckCircle style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
                 Usage access permission granted
@@ -298,14 +271,12 @@ const Settings = () => {
           )}
           
           {permissionStatus === false && usageAccessEnabled && !isCheckingPermission && !isRequestingPermission && (
-            <div
-              style={{
-                padding: '0.5rem',
-                background: 'rgba(255, 0, 0, 0.1)',
-                borderLeft: '4px solid #FF0000',
-                marginTop: '0.5rem',
-              }}
-            >
+            <div style={{
+              padding: '0.5rem',
+              background: 'rgba(255, 0, 0, 0.1)',
+              borderLeft: '4px solid #FF0000',
+              marginTop: '0.5rem',
+            }}>
               <Text size="sm" style={{ color: '#FF0000' }}>
                 <FiAlertCircle style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
                 Permission not granted
@@ -322,32 +293,17 @@ const Settings = () => {
               </Button>
             </div>
           )}
-          
-          {usageAccessEnabled && (
-            <Text size="xs" style={{ color: '#f0f0f0', marginTop: '0.5rem' }}>
-              <FiBarChart2 style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} color="#FF00FF" />
-              Usage access allows the app to track your screen time and provide accurate statistics.
-            </Text>
-          )}
         </div>
 
         {notificationsEnabled && (
           <CustomDropdown
-            options={[
-              { value: '5', label: '5m' },
-              { value: '15', label: '15m' },
-              { value: '30', label: '30m' },
-              { value: '45', label: '45m' },
-              { value: '60', label: '60m' }
-            ]}
+            options={notificationFrequencyOptions}
             value={notificationFrequency.toString()}
             onChange={(value) => {
               const frequency = parseInt(value.toString(), 10);
-              if (frequency !== notificationFrequency) {
-                console.log('Settings: Setting notification frequency to:', frequency);
+              if (frequency >= SettingsConstants.MIN_NOTIFICATION_FREQUENCY && 
+                  frequency <= SettingsConstants.MAX_NOTIFICATION_FREQUENCY) {
                 setNotificationFrequency({ frequency });
-              } else {
-                console.log('Settings: Notification frequency unchanged:', frequency);
               }
             }}
             label="Notification Frequency"

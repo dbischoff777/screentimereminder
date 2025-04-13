@@ -65,10 +65,8 @@ const getCategoryColor = (category: string): string => {
 export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   // Screen time limit in minutes
   const [screenTimeLimitState, setScreenTimeLimitState] = useState<number>(() => {
-    const saved = localStorage.getItem('screenTimeLimit');
-    const parsed = saved ? parseInt(saved, 10) : 120; // Default 2 hours
-    console.log('Initializing screen time limit from localStorage:', saved, 'parsed:', parsed);
-    return parsed;
+    // Default to 120 minutes (2 hours) initially, will be updated from native storage
+    return 120;
   });
 
   // Notification settings
@@ -78,8 +76,8 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
   });
 
   const [notificationFrequency, setNotificationFrequency] = useState<number>(() => {
-    const saved = localStorage.getItem('notificationFrequency');
-    return saved ? parseInt(saved, 10) : 5; // Default 5 minutes to match AppUsageTracker.DEFAULT_NOTIFICATION_FREQUENCY
+    // Default to 5 minutes initially, will be updated from native storage
+    return 5;
   });
 
   // Usage access permission setting
@@ -112,22 +110,40 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     }
   };
 
-  // Initialize screen time limit from native storage
+  // Load saved settings from native layer on app initialization
   useEffect(() => {
-    const initializeScreenTimeLimit = async () => {
+    const loadSavedSettings = async () => {
       try {
+        console.log('Loading saved settings from native layer...');
         const appUsageTracker = AppUsageTrackerService.getInstance();
-        const limit = await appUsageTracker.getScreenTimeLimit();
-        if (limit !== screenTimeLimitState) {
-          console.log('ScreenTimeContext: Initializing screen time limit from native storage:', limit);
-          setScreenTimeLimitState(limit);
+
+        // Load screen time limit
+        const savedLimit = await appUsageTracker.getScreenTimeLimit();
+        console.log('Loaded screen time limit:', savedLimit);
+        setScreenTimeLimitState(savedLimit);
+
+        // Load notification frequency
+        const savedFrequency = await appUsageTracker.getNotificationFrequency();
+        console.log('Loaded notification frequency:', savedFrequency);
+        setNotificationFrequency(savedFrequency);
+
+        // Check usage permission
+        const hasPermission = await appUsageTracker.hasUsagePermission();
+        console.log('Has usage permission:', hasPermission);
+        setUsageAccessEnabled(hasPermission);
+
+        // Start tracking if we have permission
+        if (hasPermission) {
+          await appUsageTracker.startTracking();
+          console.log('Usage tracking started');
         }
+
       } catch (error) {
-        console.error('Error initializing screen time limit:', error);
+        console.error('Error loading saved settings:', error);
       }
     };
 
-    initializeScreenTimeLimit();
+    loadSavedSettings();
   }, []);
 
   // Save settings to localStorage whenever they change
@@ -143,62 +159,8 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
     localStorage.setItem('notificationsEnabled', notificationsEnabled.toString());
   }, [notificationsEnabled]);
 
-  // Initialize notification frequency from native storage
   useEffect(() => {
-    const initializeNotificationFrequency = async () => {
-      try {
-        const appUsageTracker = AppUsageTrackerService.getInstance();
-        const frequency = await appUsageTracker.getNotificationFrequency();
-        setNotificationFrequency(frequency);
-        console.log('ScreenTimeContext: Initialized notification frequency from native storage:', frequency);
-      } catch (error) {
-        console.error('Error initializing notification frequency:', error);
-      }
-    };
-
-    initializeNotificationFrequency();
-  }, []);
-
-  // Save notification frequency to localStorage and sync with native code
-  useEffect(() => {
-    console.log('ScreenTimeContext: Notification frequency changed:', notificationFrequency);
     localStorage.setItem('notificationFrequency', notificationFrequency.toString());
-  }, [notificationFrequency]);
-
-  const setNotificationFrequencyWithSync = useCallback((params: number | { frequency: number }) => {
-    // Extract frequency value from either parameter type
-    const frequency = typeof params === 'number' ? params : params.frequency;
-    
-    // Only update if the frequency is actually different
-    if (frequency !== notificationFrequency) {
-      console.log('ScreenTimeContext: Setting notification frequency from:', notificationFrequency, 'to:', frequency);
-      console.log('ScreenTimeContext: Raw params:', JSON.stringify(params));
-      
-      // Update local state first
-      setNotificationFrequency(frequency);
-      
-      // Sync with native code
-      const appUsageTracker = AppUsageTrackerService.getInstance();
-      appUsageTracker.setNotificationFrequency({ frequency })
-        .then(() => {
-          console.log('ScreenTimeContext: Successfully synced notification frequency with native code:', frequency);
-          // Verify the value was saved
-          appUsageTracker.getNotificationFrequency().then(savedFrequency => {
-            console.log('ScreenTimeContext: Verified saved frequency:', savedFrequency);
-            if (savedFrequency !== frequency) {
-              console.warn('ScreenTimeContext: Frequency mismatch - Expected:', frequency, 'Got:', savedFrequency);
-            }
-          });
-        })
-        .catch(error => {
-          console.error('Error syncing notification frequency with native code:', error);
-          // Revert to previous value on error
-          console.log('ScreenTimeContext: Reverting notification frequency to:', notificationFrequency);
-          setNotificationFrequency(notificationFrequency);
-        });
-    } else {
-      console.log('ScreenTimeContext: Ignoring notification frequency update - value unchanged:', frequency);
-    }
   }, [notificationFrequency]);
 
   useEffect(() => {
@@ -558,7 +520,11 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
       console.log('ScreenTimeContext: Updating app usage data');
       const appUsageTracker = AppUsageTrackerService.getInstance();
       
-      // Get fresh data from native layer using the more accurate method
+      // Get fresh settings from native layer
+      const currentLimit = await appUsageTracker.getScreenTimeLimit();
+      const currentFrequency = await appUsageTracker.getNotificationFrequency();
+      
+      // Get fresh data from native layer
       const data = await appUsageTracker.getAppUsageData();
       console.log('ScreenTimeContext: Received app usage data:', data);
       
@@ -604,11 +570,11 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
         const totalTime = await appUsageTracker.getTotalScreenTime();
         console.log('ScreenTimeContext: Total screen time:', totalTime);
         
-        // Check screen time limit with the accurate total
+        // Check screen time limit with current settings from native layer
         await appUsageTracker.checkScreenTimeLimit({
           totalTime,
-          limit: screenTimeLimitState,
-          notificationFrequency
+          limit: currentLimit,
+          notificationFrequency: currentFrequency
         });
         
         return true;
@@ -700,6 +666,27 @@ export const ScreenTimeProvider: React.FC<{ children: ReactNode }> = ({ children
         console.error('Error syncing screen time limit with native code:', error);
       });
   }, []);
+
+  const setNotificationFrequencyWithSync = useCallback((params: number | { frequency: number }) => {
+    const frequency = typeof params === 'number' ? params : params.frequency;
+    
+    // Only update if the frequency is actually different
+    if (frequency !== notificationFrequency) {
+      console.log('Setting notification frequency from:', notificationFrequency, 'to:', frequency);
+      
+      // Update local state first
+      setNotificationFrequency(frequency);
+      
+      // Sync with native code
+      const appUsageTracker = AppUsageTrackerService.getInstance();
+      appUsageTracker.setNotificationFrequency({ frequency })
+        .catch(error => {
+          console.error('Error syncing notification frequency with native code:', error);
+          // Revert to previous value on error
+          setNotificationFrequency(notificationFrequency);
+        });
+    }
+  }, [notificationFrequency]);
 
   return (
     <ScreenTimeContext.Provider

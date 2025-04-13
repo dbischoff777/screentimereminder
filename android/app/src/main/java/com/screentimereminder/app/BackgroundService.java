@@ -51,15 +51,15 @@ import android.content.BroadcastReceiver;
 
 public class BackgroundService extends Service {
     private static final String TAG = "BackgroundService";
-    private static final String CHANNEL_ID = "ScreenTimeReminderChannel";
-    private static final String PREFS_NAME = "ScreenTimeReminder";
-    private static final int NOTIFICATION_ID_LIMIT_REACHED = 1;
-    private static final int NOTIFICATION_ID_APPROACHING_LIMIT = 2;
-    private static final int NOTIFICATION_ID_BACKGROUND_SERVICE = 3;
-    private static final long UPDATE_INTERVAL = 60000; // 1 minute
-    private static final long WATCHDOG_INTERVAL = 10000; // 10 seconds
-    private static final String ACTION_RESTART_SERVICE = "com.screentimereminder.app.RESTART_SERVICE";
-    private static final int SERVICE_RESTART_ALARM_ID = 1001;
+    private static final String CHANNEL_ID = SettingsConstants.NOTIFICATION_CHANNEL_ID;
+    private static final String PREFS_NAME = SettingsConstants.PREFS_NAME;
+    private static final int NOTIFICATION_ID_LIMIT_REACHED = SettingsConstants.NOTIFICATION_ID_LIMIT_REACHED;
+    private static final int NOTIFICATION_ID_APPROACHING_LIMIT = SettingsConstants.NOTIFICATION_ID_APPROACHING_LIMIT;
+    private static final int NOTIFICATION_ID_BACKGROUND_SERVICE = SettingsConstants.NOTIFICATION_ID_BACKGROUND_SERVICE;
+    private static final long UPDATE_INTERVAL = SettingsConstants.UPDATE_INTERVAL;
+    private static final long WATCHDOG_INTERVAL = SettingsConstants.WATCHDOG_INTERVAL;
+    private static final String ACTION_RESTART_SERVICE = SettingsConstants.ACTION_RESTART_SERVICE;
+    private static final int SERVICE_RESTART_ALARM_ID = SettingsConstants.SERVICE_RESTART_ALARM_ID;
     private static boolean isRunning = false;
     private static ScheduledExecutorService scheduler;
     private static ScheduledExecutorService watchdogScheduler;
@@ -138,39 +138,15 @@ public class BackgroundService extends Service {
         super.onCreate();
         Log.d(TAG, "Service onCreate");
         try {
-            // Register restart receiver
-            IntentFilter restartFilter = new IntentFilter(ACTION_RESTART_SERVICE);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(restartReceiver, restartFilter, Context.RECEIVER_NOT_EXPORTED);
-            } else {
-                registerReceiver(restartReceiver, restartFilter);
-            }
-
-            // Register for package updates
-            IntentFilter packageFilter = new IntentFilter();
-            packageFilter.addAction(Intent.ACTION_PACKAGE_REPLACED);
-            packageFilter.addDataScheme("package");
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(packageUpdateReceiver, packageFilter, Context.RECEIVER_NOT_EXPORTED);
-            } else {
-                registerReceiver(packageUpdateReceiver, packageFilter);
-            }
-
-            // Register for usage updates
-            IntentFilter usageFilter = new IntentFilter();
-            usageFilter.addAction("com.screentimereminder.app.APP_USAGE_UPDATE");
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(usageUpdateReceiver, usageFilter, Context.RECEIVER_NOT_EXPORTED);
-            } else {
-                registerReceiver(usageUpdateReceiver, usageFilter);
-            }
+            // Register receivers
+            registerReceivers();
 
             // Set up alarm manager for service restart
             alarmManager = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
             Intent intent = new Intent(this, BackgroundService.class);
-            intent.setAction(ACTION_RESTART_SERVICE);
+            intent.setAction(SettingsConstants.ACTION_RESTART_SERVICE);
             restartIntent = PendingIntent.getService(
-                this, SERVICE_RESTART_ALARM_ID, intent,
+                this, SettingsConstants.SERVICE_RESTART_ALARM_ID, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
             );
 
@@ -186,7 +162,7 @@ public class BackgroundService extends Service {
                     try {
                         if (isRunning) {
                             updateAppUsage();
-                            mainHandler.postDelayed(this, UPDATE_INTERVAL);
+                            mainHandler.postDelayed(this, SettingsConstants.UPDATE_INTERVAL);
                         }
                     } catch (Exception e) {
                         Log.e(TAG, "Error in background update cycle", e);
@@ -212,12 +188,12 @@ public class BackgroundService extends Service {
                         }
                         
                         if (isRunning) {
-                            mainHandler.postDelayed(this, WATCHDOG_INTERVAL);
+                            mainHandler.postDelayed(this, SettingsConstants.WATCHDOG_INTERVAL);
                         }
                     } catch (Exception e) {
                         Log.e(TAG, "Error in watchdog", e);
                         if (isRunning) {
-                            mainHandler.postDelayed(this, WATCHDOG_INTERVAL);
+                            mainHandler.postDelayed(this, SettingsConstants.WATCHDOG_INTERVAL);
                         }
                     }
                 }
@@ -227,7 +203,7 @@ public class BackgroundService extends Service {
             mainHandler.post(watchdogRunnable);
             
             // Start as foreground service
-            startForeground(NOTIFICATION_ID_BACKGROUND_SERVICE, createHighPriorityNotification());
+            startForeground(SettingsConstants.NOTIFICATION_ID_BACKGROUND_SERVICE, createHighPriorityNotification());
             
             // Acquire partial wake lock
             PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
@@ -242,9 +218,111 @@ public class BackgroundService extends Service {
             // Schedule service restart alarm
             scheduleServiceRestartAlarm();
 
+            Log.d(TAG, "Service initialization complete");
+
         } catch (Exception e) {
             Log.e(TAG, "Error in service onCreate", e);
             restartService();
+        }
+    }
+
+    private void registerReceivers() {
+        // Register package update receiver
+        IntentFilter packageFilter = new IntentFilter();
+        packageFilter.addAction(Intent.ACTION_PACKAGE_REPLACED);
+        packageFilter.addDataScheme("package");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(packageUpdateReceiver, packageFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(packageUpdateReceiver, packageFilter);
+        }
+
+        // Register restart receiver
+        IntentFilter restartFilter = new IntentFilter(SettingsConstants.ACTION_RESTART_SERVICE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(restartReceiver, restartFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(restartReceiver, restartFilter);
+        }
+
+        // Register usage update receiver
+        IntentFilter usageFilter = new IntentFilter(SettingsConstants.ACTION_USAGE_UPDATE);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(usageUpdateReceiver, usageFilter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(usageUpdateReceiver, usageFilter);
+        }
+    }
+
+    private void createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel channel = new NotificationChannel(
+                SettingsConstants.NOTIFICATION_CHANNEL_ID,
+                SettingsConstants.NOTIFICATION_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_HIGH
+            );
+            channel.setDescription(SettingsConstants.NOTIFICATION_CHANNEL_DESCRIPTION);
+            channel.enableLights(true);
+            channel.setLightColor(Color.RED);
+            channel.enableVibration(true);
+            channel.setVibrationPattern(new long[]{0, 1000, 500, 1000});
+            channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+            
+            NotificationManager notificationManager = getSystemService(NotificationManager.class);
+            notificationManager.createNotificationChannel(channel);
+        }
+    }
+
+    private Notification createHighPriorityNotification() {
+        try {
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(this, SettingsConstants.NOTIFICATION_CHANNEL_ID)
+                .setContentTitle("Screen Time Tracking Active")
+                .setContentText("Monitoring app usage")
+                .setSmallIcon(android.R.drawable.ic_menu_recent_history)
+                .setPriority(NotificationCompat.PRIORITY_MAX)
+                .setOngoing(true)
+                .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
+
+            // Add action to restart service
+            Intent restartIntent = new Intent(this, BackgroundService.class);
+            restartIntent.setAction(SettingsConstants.ACTION_RESTART_SERVICE);
+            PendingIntent pendingIntent = PendingIntent.getService(
+                this, 0, restartIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+            );
+            builder.addAction(android.R.drawable.ic_menu_rotate, "Restart Service", pendingIntent);
+
+            return builder.build();
+        } catch (Exception e) {
+            Log.e(TAG, "Error creating notification", e);
+            return null;
+        }
+    }
+
+    private void scheduleServiceRestartAlarm() {
+        try {
+            if (alarmManager != null) {
+                long triggerTime = System.currentTimeMillis() + SettingsConstants.SERVICE_RESTART_INTERVAL;
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    alarmManager.setExactAndAllowWhileIdle(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerTime,
+                        restartIntent
+                    );
+                } else {
+                    alarmManager.setExact(
+                        AlarmManager.RTC_WAKEUP,
+                        triggerTime,
+                        restartIntent
+                    );
+                }
+                Log.d(TAG, "Scheduled service restart alarm");
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error scheduling service restart alarm", e);
         }
     }
 
@@ -301,10 +379,13 @@ public class BackgroundService extends Service {
                 startTime = currentTime;
             }
 
-            // Calculate current screen time and check limit
+            // Calculate current screen time and let AppUsageTracker handle the check
             float totalTime = AppUsageTracker.calculateScreenTime(getApplicationContext());
-            AppUsageTracker.checkScreenTimeLimitStatic(getApplicationContext(), Math.round(totalTime), 
-                AppUsageTracker.getNotificationFrequencyStatic(getApplicationContext()));
+            AppUsageTracker.checkScreenTimeLimitStatic(
+                getApplicationContext(), 
+                Math.round(totalTime), 
+                AppUsageTracker.getNotificationFrequencyStatic(getApplicationContext())
+            );
             
         } catch (Exception e) {
             Log.e(TAG, "Error updating app usage", e);
@@ -370,17 +451,17 @@ public class BackgroundService extends Service {
             Log.d(TAG, "Starting broadcastUsageData");
             
             // Get the latest total screen time from shared preferences
-            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-            int totalMinutes = prefs.getInt("totalScreenTime", 0);
-            long lastUpdate = prefs.getLong("lastUpdateTime", 0);
+            SharedPreferences prefs = getSharedPreferences(SettingsConstants.PREFS_NAME, MODE_PRIVATE);
+            float totalScreenTime = AppUsageTracker.calculateScreenTime(getApplicationContext());
+            long lastUpdate = System.currentTimeMillis();
             
             // Create a JSON object with the usage data
             JSONObject usageData = new JSONObject();
-            usageData.put("totalMinutes", totalMinutes);
+            usageData.put("totalScreenTime", totalScreenTime);
             usageData.put("timestamp", lastUpdate);
             
             // Broadcast the update
-            Intent intent = new Intent("com.screentimereminder.app.APP_USAGE_UPDATE");
+            Intent intent = new Intent(SettingsConstants.ACTION_USAGE_UPDATE);
             intent.putExtra("usageData", usageData.toString());
             sendBroadcast(intent);
             
@@ -454,53 +535,6 @@ public class BackgroundService extends Service {
         }
     }
 
-    private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            NotificationChannel channel = new NotificationChannel(
-                CHANNEL_ID,
-                "Screen Time Tracking",
-                NotificationManager.IMPORTANCE_HIGH
-            );
-            channel.setDescription("Tracks screen time and shows notifications");
-            channel.enableLights(true);
-            channel.setLightColor(Color.RED);
-            channel.enableVibration(true);
-            channel.setVibrationPattern(new long[]{0, 1000, 500, 1000});
-            channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-            
-            NotificationManager notificationManager = getSystemService(NotificationManager.class);
-            notificationManager.createNotificationChannel(channel);
-        }
-    }
-
-    private Notification createHighPriorityNotification() {
-        try {
-            NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("Screen Time Tracking Active")
-                .setContentText("Monitoring app usage")
-                .setSmallIcon(android.R.drawable.ic_menu_recent_history)
-                .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setOngoing(true)
-                .setCategory(NotificationCompat.CATEGORY_SERVICE)
-                .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
-
-            // Add action to restart service
-            Intent restartIntent = new Intent(this, BackgroundService.class);
-            restartIntent.setAction(ACTION_RESTART_SERVICE);
-            PendingIntent pendingIntent = PendingIntent.getService(
-                this, 0, restartIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-            );
-            builder.addAction(android.R.drawable.ic_menu_rotate, "Restart Service", pendingIntent);
-
-            return builder.build();
-        } catch (Exception e) {
-            Log.e(TAG, "Error creating notification", e);
-            return null;
-        }
-    }
-
     private long getStartOfDay() {
         Calendar calendar = Calendar.getInstance();
         calendar.set(Calendar.HOUR_OF_DAY, 0);
@@ -546,7 +580,7 @@ public class BackgroundService extends Service {
             
             // Start new service instance
             Intent restartIntent = new Intent(getApplicationContext(), BackgroundService.class);
-            restartIntent.setAction(ACTION_RESTART_SERVICE);
+            restartIntent.setAction(SettingsConstants.ACTION_RESTART_SERVICE);
             
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(restartIntent);
@@ -564,7 +598,7 @@ public class BackgroundService extends Service {
 
     private void verifyBackgroundUpdates() {
         try {
-            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            SharedPreferences prefs = getSharedPreferences(SettingsConstants.PREFS_NAME, Context.MODE_PRIVATE);
             long lastUpdate = prefs.getLong("lastUpdateTime", 0);
             long currentTime = System.currentTimeMillis();
             
@@ -640,37 +674,10 @@ public class BackgroundService extends Service {
         }
     }
 
-    private void scheduleServiceRestartAlarm() {
-        try {
-            // Schedule alarm to restart service every 15 minutes as backup
-            if (alarmManager != null) {
-                long interval = 15 * 60 * 1000; // 15 minutes
-                long triggerTime = System.currentTimeMillis() + interval;
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    alarmManager.setExactAndAllowWhileIdle(
-                        AlarmManager.RTC_WAKEUP,
-                        triggerTime,
-                        restartIntent
-                    );
-                } else {
-                    alarmManager.setExact(
-                        AlarmManager.RTC_WAKEUP,
-                        triggerTime,
-                        restartIntent
-                    );
-                }
-                Log.d(TAG, "Scheduled service restart alarm");
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Error scheduling service restart alarm", e);
-        }
-    }
-
     private void startServiceInternal() {
         try {
             Intent serviceIntent = new Intent(getApplicationContext(), BackgroundService.class);
-            serviceIntent.setAction(ACTION_RESTART_SERVICE);
+            serviceIntent.setAction(SettingsConstants.ACTION_RESTART_SERVICE);
             
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(serviceIntent);
