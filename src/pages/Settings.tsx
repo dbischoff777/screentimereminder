@@ -34,9 +34,47 @@ const Settings = () => {
   const [isCheckingPermission, setIsCheckingPermission] = useState(false);
   const [isRequestingPermission, setIsRequestingPermission] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<boolean | null>(null);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
 
   // Get the tracker service instance
   const trackerService = AppUsageTracker.getInstance();
+
+  // Load saved settings from native layer
+  useEffect(() => {
+    const loadSavedSettings = async () => {
+      try {
+        setIsLoadingSettings(true);
+        
+        // Get shared preferences from native layer
+        const prefs = await trackerService.getSharedPreferences();
+        console.log('Loaded settings from native layer:', prefs);
+        
+        // Update screen time limit if different
+        if (typeof prefs.screenTimeLimit === 'number' && prefs.screenTimeLimit !== screenTimeLimit) {
+          setScreenTimeLimit({ limitMinutes: prefs.screenTimeLimit });
+        }
+        
+        // Update notification frequency if different
+        if (typeof prefs.notificationFrequency === 'number' && prefs.notificationFrequency !== notificationFrequency) {
+          setNotificationFrequency({ frequency: prefs.notificationFrequency });
+        }
+        
+        // Check usage permission
+        const hasPermission = await trackerService.hasUsagePermission();
+        setPermissionStatus(hasPermission);
+        if (hasPermission !== usageAccessEnabled) {
+          setUsageAccessEnabled(hasPermission);
+        }
+        
+      } catch (error) {
+        console.error('Error loading saved settings:', error);
+      } finally {
+        setIsLoadingSettings(false);
+      }
+    };
+
+    loadSavedSettings();
+  }, []);
 
   // Initialize permission states
   useEffect(() => {
@@ -168,160 +206,175 @@ const Settings = () => {
         SYSTEM SETTINGS
       </Title>
 
-      <div style={{
-        padding: '2rem',
-        background: 'transparent',
-        borderTop: '1px solid #FF00FF',
-        borderBottom: '1px solid #FF00FF',
-        marginBottom: '2rem',
-      }}>
-        <Title order={3} style={{
-          color: '#FF00FF',
-          marginBottom: '1.5rem',
-          textShadow: '0 0 5px #FF00FF',
+      {isLoadingSettings ? (
+        <Container style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center', 
+          justifyContent: 'center',
+          minHeight: '200px'
         }}>
-          Screen Time Configuration
-        </Title>
+          <Loader color="#00FFFF" size="xl" />
+          <Text style={{ color: '#00FFFF', marginTop: '1rem' }}>
+            Loading settings...
+          </Text>
+        </Container>
+      ) : (
+        <Container style={{
+          padding: '2rem',
+          background: 'transparent',
+          borderTop: '1px solid #FF00FF',
+          borderBottom: '1px solid #FF00FF',
+          marginBottom: '2rem',
+        }}>
+          <Title order={3} style={{
+            color: '#FF00FF',
+            marginBottom: '1.5rem',
+            textShadow: '0 0 5px #FF00FF',
+          }}>
+            Screen Time Configuration
+          </Title>
 
-        <CustomDropdown
-          options={screenTimeLimitOptions}
-          value={screenTimeLimit.toString()}
-          onChange={(value) => {
-            const limitMinutes = typeof value === 'string' ? parseInt(value, 10) : value;
-            if (limitMinutes >= SettingsConstants.MIN_SCREEN_TIME_LIMIT && 
-                limitMinutes <= SettingsConstants.MAX_SCREEN_TIME_LIMIT) {
-              setScreenTimeLimit({ limitMinutes });
-            }
-          }}
-          label="Daily Screen Time Limit"
-        />
-
-        <Group style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between' }}>
-          <Text style={{ color: '#00FFFF' }}>Enable Notifications</Text>
-          <Switch 
-            checked={notificationsEnabled}
-            onChange={(event) => setNotificationsEnabled(event.currentTarget.checked)}
-            color="cyan"
-            styles={{
-              track: {
-                backgroundColor: notificationsEnabled ? 'rgba(0, 255, 255, 0.5)' : 'rgba(100, 100, 100, 0.3)',
-                borderColor: notificationsEnabled ? '#00FFFF' : '#666666',
+          <CustomDropdown
+            options={screenTimeLimitOptions}
+            value={screenTimeLimit.toString()}
+            onChange={(value) => {
+              const limitMinutes = typeof value === 'string' ? parseInt(value, 10) : value;
+              if (limitMinutes >= SettingsConstants.MIN_SCREEN_TIME_LIMIT && 
+                  limitMinutes <= SettingsConstants.MAX_SCREEN_TIME_LIMIT) {
+                setScreenTimeLimit({ limitMinutes });
               }
             }}
+            label="Daily Screen Time Limit"
           />
-        </Group>
 
-        {/* Usage Access Permission Section */}
-        <div style={{ marginBottom: '2rem' }}>
-          <Group style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <Text style={{ color: '#00FFFF' }}>Enable Usage Access</Text>
+          <Group style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between' }}>
+            <Text style={{ color: '#00FFFF' }}>Enable Notifications</Text>
             <Switch 
-              checked={usageAccessEnabled}
-              onChange={(event) => {
-                setUsageAccessEnabled(event.currentTarget.checked);
-                if (event.currentTarget.checked && !permissionStatus) {
-                  requestUsagePermission();
-                }
-              }}
+              checked={notificationsEnabled}
+              onChange={(event) => setNotificationsEnabled(event.currentTarget.checked)}
               color="cyan"
               styles={{
                 track: {
-                  backgroundColor: usageAccessEnabled ? 'rgba(0, 255, 255, 0.5)' : 'rgba(100, 100, 100, 0.3)',
-                  borderColor: usageAccessEnabled ? '#00FFFF' : '#666666',
+                  backgroundColor: notificationsEnabled ? 'rgba(0, 255, 255, 0.5)' : 'rgba(100, 100, 100, 0.3)',
+                  borderColor: notificationsEnabled ? '#00FFFF' : '#666666',
                 }
               }}
             />
           </Group>
 
-          {/* Permission Status Indicators */}
-          {isCheckingPermission && (
-            <div style={{ textAlign: 'center', margin: '1rem 0' }}>
-              <Loader color="#00FFFF" size="sm" />
-              <Text size="sm" style={{ color: '#00FFFF', marginTop: '0.5rem' }}>
-                Checking permission status...
-              </Text>
-            </div>
-          )}
-          
-          {isRequestingPermission && !isCheckingPermission && (
-            <div style={{ textAlign: 'center', margin: '1rem 0' }}>
-              <Loader color="#FF00FF" size="sm" />
-              <Text size="sm" style={{ color: '#FF00FF', marginTop: '0.5rem' }}>
-                Waiting for permission to be granted...
-              </Text>
-              <Text size="xs" style={{ color: '#f0f0f0', marginTop: '0.5rem' }}>
-                When the settings page opens, find "Screen Time Reminder" in the list and toggle it ON.
-                Then return to this app.
-              </Text>
-            </div>
-          )}
-          
-          {permissionStatus === true && !isCheckingPermission && !isRequestingPermission && (
-            <div style={{
-              padding: '0.5rem',
-              background: 'rgba(0, 255, 0, 0.1)',
-              borderLeft: '4px solid #00FF00',
-              marginTop: '0.5rem',
-            }}>
-              <Text size="sm" style={{ color: '#00FF00' }}>
-                <FiCheckCircle style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
-                Usage access permission granted
-              </Text>
-            </div>
-          )}
-          
-          {permissionStatus === false && usageAccessEnabled && !isCheckingPermission && !isRequestingPermission && (
-            <div style={{
-              padding: '0.5rem',
-              background: 'rgba(255, 0, 0, 0.1)',
-              borderLeft: '4px solid #FF0000',
-              marginTop: '0.5rem',
-            }}>
-              <Text size="sm" style={{ color: '#FF0000' }}>
-                <FiAlertCircle style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
-                Permission not granted
-              </Text>
-              <Button
-                size="xs"
-                onClick={requestUsagePermission}
-                style={{
-                  marginTop: '0.5rem',
-                  background: 'linear-gradient(45deg, #FF00FF, #00FFFF)',
+          {/* Usage Access Permission Section */}
+          <div style={{ marginBottom: '2rem' }}>
+            <Group style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <Text style={{ color: '#00FFFF' }}>Enable Usage Access</Text>
+              <Switch 
+                checked={usageAccessEnabled}
+                onChange={(event) => {
+                  setUsageAccessEnabled(event.currentTarget.checked);
+                  if (event.currentTarget.checked && !permissionStatus) {
+                    requestUsagePermission();
+                  }
                 }}
-              >
-                Request Permission
-              </Button>
-            </div>
+                color="cyan"
+                styles={{
+                  track: {
+                    backgroundColor: usageAccessEnabled ? 'rgba(0, 255, 255, 0.5)' : 'rgba(100, 100, 100, 0.3)',
+                    borderColor: usageAccessEnabled ? '#00FFFF' : '#666666',
+                  }
+                }}
+              />
+            </Group>
+
+            {/* Permission Status Indicators */}
+            {isCheckingPermission && (
+              <div style={{ textAlign: 'center', margin: '1rem 0' }}>
+                <Loader color="#00FFFF" size="sm" />
+                <Text size="sm" style={{ color: '#00FFFF', marginTop: '0.5rem' }}>
+                  Checking permission status...
+                </Text>
+              </div>
+            )}
+            
+            {isRequestingPermission && !isCheckingPermission && (
+              <div style={{ textAlign: 'center', margin: '1rem 0' }}>
+                <Loader color="#FF00FF" size="sm" />
+                <Text size="sm" style={{ color: '#FF00FF', marginTop: '0.5rem' }}>
+                  Waiting for permission to be granted...
+                </Text>
+                <Text size="xs" style={{ color: '#f0f0f0', marginTop: '0.5rem' }}>
+                  When the settings page opens, find "Screen Time Reminder" in the list and toggle it ON.
+                  Then return to this app.
+                </Text>
+              </div>
+            )}
+            
+            {permissionStatus === true && !isCheckingPermission && !isRequestingPermission && (
+              <div style={{
+                padding: '0.5rem',
+                background: 'rgba(0, 255, 0, 0.1)',
+                borderLeft: '4px solid #00FF00',
+                marginTop: '0.5rem',
+              }}>
+                <Text size="sm" style={{ color: '#00FF00' }}>
+                  <FiCheckCircle style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
+                  Usage access permission granted
+                </Text>
+              </div>
+            )}
+            
+            {permissionStatus === false && usageAccessEnabled && !isCheckingPermission && !isRequestingPermission && (
+              <div style={{
+                padding: '0.5rem',
+                background: 'rgba(255, 0, 0, 0.1)',
+                borderLeft: '4px solid #FF0000',
+                marginTop: '0.5rem',
+              }}>
+                <Text size="sm" style={{ color: '#FF0000' }}>
+                  <FiAlertCircle style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} />
+                  Permission not granted
+                </Text>
+                <Button
+                  size="xs"
+                  onClick={requestUsagePermission}
+                  style={{
+                    marginTop: '0.5rem',
+                    background: 'linear-gradient(45deg, #FF00FF, #00FFFF)',
+                  }}
+                >
+                  Request Permission
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {notificationsEnabled && (
+            <CustomDropdown
+              options={notificationFrequencyOptions}
+              value={notificationFrequency.toString()}
+              onChange={(value) => {
+                const frequency = parseInt(value.toString(), 10);
+                if (frequency >= SettingsConstants.MIN_NOTIFICATION_FREQUENCY && 
+                    frequency <= SettingsConstants.MAX_NOTIFICATION_FREQUENCY) {
+                  setNotificationFrequency({ frequency });
+                }
+              }}
+              label="Notification Frequency"
+            />
           )}
-        </div>
 
-        {notificationsEnabled && (
-          <CustomDropdown
-            options={notificationFrequencyOptions}
-            value={notificationFrequency.toString()}
-            onChange={(value) => {
-              const frequency = parseInt(value.toString(), 10);
-              if (frequency >= SettingsConstants.MIN_NOTIFICATION_FREQUENCY && 
-                  frequency <= SettingsConstants.MAX_NOTIFICATION_FREQUENCY) {
-                setNotificationFrequency({ frequency });
-              }
+          <Button
+            fullWidth
+            size="lg"
+            onClick={handleSaveSettings}
+            style={{
+              marginTop: '1.5rem',
+              background: 'linear-gradient(45deg, #FF00FF, #00FFFF)',
             }}
-            label="Notification Frequency"
-          />
-        )}
-
-        <Button
-          fullWidth
-          size="lg"
-          onClick={handleSaveSettings}
-          style={{
-            marginTop: '1.5rem',
-            background: 'linear-gradient(45deg, #FF00FF, #00FFFF)',
-          }}
-        >
-          SAVE SETTINGS
-        </Button>
-      </div>
+          >
+            SAVE SETTINGS
+          </Button>
+        </Container>
+      )}
     </Container>
   );
 };
