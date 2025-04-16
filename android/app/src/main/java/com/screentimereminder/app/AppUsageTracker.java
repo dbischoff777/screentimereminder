@@ -1793,7 +1793,7 @@ public class AppUsageTracker extends Plugin {
             // Check if it's a system app
             boolean isSystem = (appInfo.flags & ApplicationInfo.FLAG_SYSTEM) != 0;
             
-            // Explicitly include common browsers and mail apps even if they are system apps
+            // Explicitly include common browsers, mail apps, and navigation apps even if they are system apps
             if (isSystem) {
                 String appNameLower = packageName.toLowerCase();
                 if (appNameLower.contains("browser") || 
@@ -1805,8 +1805,23 @@ public class AppUsageTracker extends Plugin {
                     appNameLower.contains("gmail") || 
                     appNameLower.contains("outlook") || 
                     appNameLower.contains("k9") ||
-                    appNameLower.contains("yahoo")) {
-                    // This is a browser or mail app, include it in tracking
+                    appNameLower.contains("yahoo") ||
+                    appNameLower.contains("maps") || // Include Google Maps
+                    appNameLower.contains("navigation") || // Include other navigation apps
+                    appNameLower.contains("waze") || // Include Waze
+                    appNameLower.contains("google") || // Include other Google apps
+                    appNameLower.contains("youtube") || // Include YouTube
+                    appNameLower.contains("play") || // Include Google Play apps
+                    appNameLower.contains("drive") || // Include Google Drive
+                    appNameLower.contains("photos") || // Include Google Photos
+                    appNameLower.contains("calendar") || // Include Calendar apps
+                    appNameLower.contains("contacts") || // Include Contacts apps
+                    appNameLower.contains("camera") || // Include Camera apps
+                    appNameLower.contains("gallery") || // Include Gallery apps
+                    appNameLower.contains("music") || // Include Music apps
+                    appNameLower.contains("video") || // Include Video apps
+                    appNameLower.contains("player")) { // Include Media players
+                    // This is a commonly used app, include it in tracking
                     return false;
                 }
             }
