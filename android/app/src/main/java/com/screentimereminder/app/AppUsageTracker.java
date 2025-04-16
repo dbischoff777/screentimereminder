@@ -1516,9 +1516,12 @@ public class AppUsageTracker extends Plugin {
                     continue;
                 }
                 
-                long timeInForeground = stat.getTotalTimeInForeground();
-                if (timeInForeground > 0) {
-                    totalMinutes += timeInForeground / 60000.0f; // Convert to minutes
+                // Only count time if the app was used today
+                if (stat.getLastTimeUsed() >= startTime) {
+                    long timeInForeground = stat.getTotalTimeInForeground();
+                    if (timeInForeground > 0) {
+                        totalMinutes += timeInForeground / 60000.0f; // Convert to minutes
+                    }
                 }
             }
 
