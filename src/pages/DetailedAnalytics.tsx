@@ -16,6 +16,7 @@ const DetailedAnalytics = () => {
   } = useScreenTime();
   const [totalScreenTime, setTotalScreenTime] = useState(0);
   const [activeTab, setActiveTab] = useState<string | null>('heatmap');
+  const [sortedTimelineData, setSortedTimelineData] = useState<AppUsage[]>([]);
 
   // Add focus session tracking
   const [focusSessions, setFocusSessions] = useState<{
@@ -25,13 +26,22 @@ const DetailedAnalytics = () => {
   }[]>([]);
 
   useEffect(() => {
-    // Calculate total screen time
+    // Get total screen time directly from AppUsageTracker
     const total = getTotalScreenTime();
     setTotalScreenTime(total);
   }, [appUsageData, getTotalScreenTime]);
 
+  // Load timeline data
+  useEffect(() => {
+    const loadTimelineData = async () => {
+      const data = await getCurrentDayData();
+      setSortedTimelineData(data);
+    };
+    loadTimelineData();
+  }, [appUsageData]);
+
   // Filter and sort current day's data
-  const getCurrentDayData = async () => {
+  const getCurrentDayData = async (): Promise<AppUsage[]> => {
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
@@ -39,16 +49,8 @@ const DetailedAnalytics = () => {
     // Get all usage events for today
     const usageData = await getAppUsageData(startOfDay.getTime(), endOfDay.getTime());
     
-    // Group usage events by app and calculate total time for each
-    const appUsageMap = new Map<string, {
-      name: string;
-      time: number;
-      lastUsed?: Date;
-      category: string;
-      color: string;
-      icon?: string;
-      usageInstances: Array<{ startTime: Date; endTime: Date; duration: number }>;
-    }>();
+    // Group usage events by app
+    const appUsageMap = new Map<string, AppUsage>();
 
     usageData.forEach((app: AppUsage) => {
       if (!app.lastUsed) return;
@@ -59,63 +61,40 @@ const DetailedAnalytics = () => {
       if (!appUsageMap.has(app.name)) {
         appUsageMap.set(app.name, {
           name: app.name,
-          time: 0,
+          time: app.time || 0,
           lastUsed: app.lastUsed,
           category: app.category,
           color: app.color,
-          icon: app.icon,
-          usageInstances: []
-        });
-      }
-      
-      const appData = appUsageMap.get(app.name)!;
-      const startTime = new Date(app.lastUsed.getTime() - app.time * 60000);
-      
-      // If the usage started before midnight, adjust the start time and duration
-      if (startTime < startOfDay) {
-        const adjustedDuration = (app.lastUsed.getTime() - startOfDay.getTime()) / (60 * 1000);
-        if (adjustedDuration > 0) {
-          appData.time += adjustedDuration;
-          appData.usageInstances.push({
-            startTime: startOfDay,
-            endTime: app.lastUsed,
-            duration: adjustedDuration
-          });
-        }
-      } else {
-        appData.time += app.time;
-        appData.usageInstances.push({
-          startTime,
-          endTime: app.lastUsed,
-          duration: app.time
+          icon: app.icon
         });
       }
     });
 
-    // Convert map to array and sort by last used time
+    // Convert to array and sort by lastUsed time (most recent first)
     return Array.from(appUsageMap.values())
       .sort((a, b) => {
-        const timeA = a.lastUsed ? a.lastUsed.getTime() : 0;
-        const timeB = b.lastUsed ? b.lastUsed.getTime() : 0;
+        const timeA = a.lastUsed ? new Date(a.lastUsed).getTime() : 0;
+        const timeB = b.lastUsed ? new Date(b.lastUsed).getTime() : 0;
         return timeB - timeA;
       });
   };
 
-  const [sortedTimelineData, setSortedTimelineData] = useState<Array<{
-    name: string;
-    time: number;
-    lastUsed?: Date;
-    category: string;
-    color: string;
-    icon?: string;
-    usageInstances: Array<{ startTime: Date; endTime: Date; duration: number }>;
-  }>>([]);
+  // Calculate category distribution using native categories
+  const calculateCategoryDistribution = () => {
+    const distribution = new Map();
 
-  useEffect(() => {
-    getCurrentDayData().then(data => {
-      setSortedTimelineData(data);
+    sortedTimelineData.forEach(app => {
+      const category = app.category || 'Other';
+      const current = distribution.get(category) || 0;
+      distribution.set(category, current + app.time);
     });
-  }, [appUsageData]);
+
+    return Array.from(distribution.entries()).map(([category, time]) => ({
+      category,
+      time,
+      percentage: totalScreenTime > 0 ? Math.round((time / totalScreenTime) * 100) : 0
+    }));
+  };
 
   // Get most used app sorted by time
   const getMostUsedApp = () => {
@@ -272,27 +251,6 @@ const DetailedAnalytics = () => {
     if (score >= -75) return 'Distracting';
     return 'Highly Distracting';
   };
-
-  // Calculate category distribution using native categories
-  const calculateCategoryDistribution = () => {
-    const distribution = new Map();
-    let totalTime = 0;
-
-    sortedTimelineData.forEach(app => {
-      const category = app.category || 'Other';
-      const current = distribution.get(category) || 0;
-      distribution.set(category, current + app.time);
-      totalTime += app.time;
-    });
-
-    return Array.from(distribution.entries()).map(([category, time]) => ({
-      category,
-      time,
-      percentage: totalTime > 0 ? Math.round((time / totalTime) * 100) : 0
-    }));
-  };
-
-  const categoryDistribution = calculateCategoryDistribution();
 
   // Handle completed focus sessions
   const handleFocusSessionComplete = (category: string, duration: number) => {
@@ -524,10 +482,10 @@ const DetailedAnalytics = () => {
                 color: '#FFFFFF',
               }}>
                 <Text size="xl" fw={700}>
-                  {Math.floor(heatmapData.reduce((sum, val) => sum + val, 0) / 60)}h
+                  {Math.floor(totalScreenTime / 60)}h
                 </Text>
                 <Text size="sm">
-                  {Math.round(heatmapData.reduce((sum, val) => sum + val, 0) % 60)}m
+                  {Math.round(totalScreenTime % 60)}m
                 </Text>
               </div>
             </div>
@@ -753,17 +711,8 @@ const DetailedAnalytics = () => {
                     }}
                   />
                   
-                  {sortedTimelineData
-                    .flatMap(app => 
-                      app.usageInstances.map(instance => ({
-                        ...instance,
-                        appName: app.name,
-                        appIcon: app.icon,
-                        appColor: app.color
-                      }))
-                    )
-                    .sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
-                    .map((instance, index) => (
+                  <div style={{ marginTop: '2rem' }}>
+                    {sortedTimelineData.map((app, index) => (
                       <div
                         key={index}
                         style={{
@@ -782,61 +731,42 @@ const DetailedAnalytics = () => {
                           textAlign: 'right',
                           fontWeight: 500
                         }}>
-                          {formatTimelineTime(instance.startTime)}
+                          {formatTimelineTime(app.lastUsed)}
                         </Text>
                         
-                        {/* App icon container */}
+                        {/* App info */}
                         <div style={{
-                          position: 'relative',
-                          zIndex: 2,
-                          background: 'transparent',
-                          borderRadius: '50%',
-                          padding: '2px',
-                          marginRight: '16px'
+                          flex: 1,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '1rem'
                         }}>
-                          {instance.appIcon ? (
-                            <img
-                              src={instance.appIcon}
-                              alt={instance.appName}
+                          {/* App icon */}
+                          {app.icon && (
+                            <img 
+                              src={app.icon} 
+                              alt={app.name}
                               style={{
                                 width: '32px',
                                 height: '32px',
-                                borderRadius: '50%',
-                                objectFit: 'cover'
+                                borderRadius: '8px'
                               }}
                             />
-                          ) : (
-                            <div style={{
-                              width: '32px',
-                              height: '32px',
-                              borderRadius: '50%',
-                              background: instance.appColor,
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              fontSize: '16px',
-                              color: '#FFFFFF'
-                            }}>
-                              {instance.appName.charAt(0)}
-                            </div>
                           )}
-                        </div>
-                        
-                        {/* App info */}
-                        <div style={{ flex: 1 }}>
-                          <Text style={{ 
-                            color: '#FFFFFF', 
-                            fontWeight: 500,
-                            marginBottom: '4px'
-                          }}>
-                            {instance.appName}
-                          </Text>
-                          <Text size="sm" style={{ color: '#AAAAAA' }}>
-                            {formatDetailedTime(instance.duration)}
-                          </Text>
+                          
+                          {/* App name and duration */}
+                          <div>
+                            <Text style={{ color: '#FFFFFF', fontWeight: 500 }}>
+                              {app.name}
+                            </Text>
+                            <Text size="sm" style={{ color: '#AAAAAA' }}>
+                              {formatDetailedTime(app.time)}
+                            </Text>
+                          </div>
                         </div>
                       </div>
                     ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -909,7 +839,7 @@ const DetailedAnalytics = () => {
                     <Text fw={500} style={{ color: '#FFFFFF', marginBottom: '1rem' }}>
                       Category Distribution
                     </Text>
-                    {categoryDistribution.map(({ category, time, percentage }) => (
+                    {calculateCategoryDistribution().map(({ category, time, percentage }) => (
                       <div key={category} style={{ marginBottom: '1rem' }}>
                         <div style={{ 
                           display: 'flex', 

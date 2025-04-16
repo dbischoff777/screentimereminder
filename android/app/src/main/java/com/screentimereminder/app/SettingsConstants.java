@@ -7,8 +7,8 @@ package com.screentimereminder.app;
 public class SettingsConstants {
     // Screen time limits (in minutes)
     public static final long MIN_SCREEN_TIME_LIMIT = 30;  // 30 minutes
-    public static final long MAX_SCREEN_TIME_LIMIT = 240; // 4 hours
-    public static final long DEFAULT_SCREEN_TIME_LIMIT = 120; // 2 hours
+    public static final long MAX_SCREEN_TIME_LIMIT = 480; // 8 hours (increased from 4 hours)
+    public static final long DEFAULT_SCREEN_TIME_LIMIT = 180; // 3 hours (increased from 2 hours)
 
     // Notification frequency (in minutes)
     public static final long MIN_NOTIFICATION_FREQUENCY = 5;  // 5 minutes

@@ -291,7 +291,7 @@ public class ScreenTimeWidgetProvider extends AppWidgetProvider {
 
     private String formatTime(float minutes) {
         int hours = (int) (minutes / 60);
-        int mins = Math.round(minutes % 60);
+        int mins = (int) (minutes % 60);
         
         if (hours > 0) {
             return String.format(Locale.getDefault(), "%dh %dm", hours, mins);

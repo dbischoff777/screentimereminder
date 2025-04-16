@@ -1477,7 +1477,7 @@ public class AppUsageTracker extends Plugin {
      */
     public static float calculateScreenTime(Context context) {
         try {
-            // Get start of day in user's local timezone (same as in Statistics.tsx)
+            // Get start of day in user's local timezone
             Calendar calendar = Calendar.getInstance();
             calendar.set(Calendar.HOUR_OF_DAY, 0);
             calendar.set(Calendar.MINUTE, 0);
@@ -1507,44 +1507,31 @@ public class AppUsageTracker extends Plugin {
             float totalMinutes = 0;
             String ourPackage = context.getPackageName();
 
+            // Calculate total time from UsageStats
             for (UsageStats stat : stats) {
                 String packageName = stat.getPackageName();
                 
-                // Skip our own app and system apps
-                if (packageName.equals(ourPackage) || isSystemApp(context, packageName)) {
+                // Skip our own app and system apps (except common ones)
+                if (packageName.equals(ourPackage) || (isSystemApp(context, packageName) && !isCommonApp(packageName))) {
                     continue;
                 }
-
-                // Only process if the app was used today
-                if (stat.getLastTimeUsed() >= startTime && stat.getLastTimeUsed() <= endTime) {
-                    long lastUsed = stat.getLastTimeUsed();
-                    long timeInForeground = stat.getTotalTimeInForeground();
-                    long appStartTime = lastUsed - timeInForeground;
-
-                    // If the app was used before midnight, adjust the duration
-                    if (appStartTime < startTime) {
-                        // Only count time after midnight
-                        float adjustedDuration = (lastUsed - startTime) / (60f * 1000f);
-                        if (adjustedDuration > 0) {
-                            totalMinutes += adjustedDuration;
-                        }
-                    } else {
-                        // App was used entirely today, count full duration
-                        totalMinutes += timeInForeground / (60f * 1000f);
-                    }
+                
+                long timeInForeground = stat.getTotalTimeInForeground();
+                if (timeInForeground > 0) {
+                    totalMinutes += timeInForeground / 60000.0f; // Convert to minutes
                 }
             }
 
-            // Store the calculated value with timestamp
+            Log.d(TAG, String.format("Calculated total screen time: %.2f minutes", totalMinutes));
+
+            // Store the calculated value
             SharedPreferences.Editor editor = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit();
             editor.putFloat(KEY_TOTAL_SCREEN_TIME, totalMinutes);
             editor.putLong(KEY_LAST_UPDATE, System.currentTimeMillis());
             editor.apply();
 
-            // Get current screen time limit to include in the widget update
+            // Update widget
             int screenTimeLimit = getScreenTimeLimitStatic(context);
-
-            // Update widget with fresh data
             Intent updateIntent = new Intent(context, ScreenTimeWidgetProvider.class);
             updateIntent.setAction("android.appwidget.action.APPWIDGET_UPDATE");
             int[] ids = AppWidgetManager.getInstance(context)
@@ -1554,12 +1541,40 @@ public class AppUsageTracker extends Plugin {
             updateIntent.putExtra("screenTimeLimit", screenTimeLimit);
             context.sendBroadcast(updateIntent);
 
-            Log.d(TAG, "Total screen time for today: " + totalMinutes + " minutes (limit: " + screenTimeLimit + " minutes)");
             return totalMinutes;
         } catch (Exception e) {
-            Log.e(TAG, "Error getting total screen time", e);
+            Log.e(TAG, "Error calculating screen time", e);
             return getFallbackScreenTime(context);
         }
+    }
+
+    private static boolean isCommonApp(String packageName) {
+        String lowerCase = packageName.toLowerCase();
+        return lowerCase.contains("browser") || 
+               lowerCase.contains("chrome") || 
+               lowerCase.contains("firefox") || 
+               lowerCase.contains("opera") || 
+               lowerCase.contains("edge") ||
+               lowerCase.contains("mail") || 
+               lowerCase.contains("gmail") || 
+               lowerCase.contains("outlook") || 
+               lowerCase.contains("k9") ||
+               lowerCase.contains("yahoo") ||
+               lowerCase.contains("maps") ||
+               lowerCase.contains("navigation") ||
+               lowerCase.contains("waze") ||
+               lowerCase.contains("google") ||
+               lowerCase.contains("youtube") ||
+               lowerCase.contains("play") ||
+               lowerCase.contains("drive") ||
+               lowerCase.contains("photos") ||
+               lowerCase.contains("calendar") ||
+               lowerCase.contains("contacts") ||
+               lowerCase.contains("camera") ||
+               lowerCase.contains("gallery") ||
+               lowerCase.contains("music") ||
+               lowerCase.contains("video") ||
+               lowerCase.contains("player");
     }
 
     private static float getFallbackScreenTime(Context context) {
@@ -2423,7 +2438,7 @@ public class AppUsageTracker extends Plugin {
                         ((NOTIFICATION_COOLDOWN - (currentTime - lastLimitReached)) / 60000) + 
                         " minutes until next notification");
                 }
-            } else if (percentOfLimit >= 90) {
+            } else if (percentOfLimit >= 80) { // Changed from 90% to 80% to give more warning
                 // Check cooldown for approaching limit notification
                 if (currentTime - lastApproachingLimit >= NOTIFICATION_COOLDOWN) {
                     showNotification(getContext(), "Approaching Screen Time Limit", 

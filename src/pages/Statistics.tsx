@@ -13,6 +13,7 @@ const Statistics = () => {
     updateAppUsageData 
   } = useScreenTime();
   const [percentOfLimit, setPercentOfLimit] = useState(0);
+  const [totalScreenTime, setTotalScreenTime] = useState(0);
   const location = useLocation();
   
   // Check if we're coming from the settings page after a reset
@@ -29,14 +30,15 @@ const Statistics = () => {
   }, [location.state]);
   
   useEffect(() => {
-    // Calculate total screen time
+    // Get total screen time directly from AppUsageTracker
     const total = getTotalScreenTime();
+    setTotalScreenTime(total);
     
     // Calculate percentage of limit
     const percent = (total / screenTimeLimit) * 100;
     setPercentOfLimit(Math.min(percent, 100)); // Cap at 100%
     
-    console.log('Statistics: Updated UI with latest app usage data');
+    console.log('Statistics: Updated UI with latest total screen time:', total);
   }, [appUsageData, screenTimeLimit, getTotalScreenTime]);
 
   useEffect(() => {
@@ -144,35 +146,30 @@ const Statistics = () => {
 
   const sortedTimelineData = getCurrentDayData();
 
-  // Calculate total screen time for today from all apps in timeline
-  const getTotalTodayScreenTime = () => {
-    return sortedTimelineData.reduce((sum, app) => sum + app.time, 0);
-  };
-
-  const totalTodayScreenTime = getTotalTodayScreenTime();
-
   // Get filtered and sorted apps for breakdown and distribution sections
   const getFilteredApps = () => {
-    const totalTime = totalTodayScreenTime;
     const allApps = sortedTimelineData
       .filter(app => app.time > 0)  // Only filter out apps with no usage
-      .sort((a, b) => b.time - a.time);
+      .sort((a, b) => b.time - a.time);  // Sort by usage time (descending)
     
-    // If we have too many apps, only show the top ones that make up 95% of usage
-    // or have at least 1% usage time
-    if (allApps.length > 6) {  // show 6 apps
-      let accumulatedPercentage = 0;
-      return allApps.filter(app => {
-        const percentage = (app.time / totalTime) * 100;
-        accumulatedPercentage += percentage;
-        // Show apps that either:
-        // 1. Contribute to the first 95% of usage OR
-        // 2. Have at least 1% usage time
-        return accumulatedPercentage <= 95 || percentage >= 4;
-      });
+    // Always limit to top 6 apps
+    const topApps = allApps.slice(0, 6);
+    
+    // Calculate accumulated percentage for the remaining apps
+    if (allApps.length > 6) {
+      const otherAppsTime = allApps.slice(6).reduce((sum, app) => sum + app.time, 0);
+      if (otherAppsTime > 0) {
+        topApps.push({
+          name: 'Other Apps',
+          time: otherAppsTime,
+          category: 'Other',
+          color: '#808080',  // Gray color for Other category
+          lastUsed: new Date()
+        });
+      }
     }
     
-    return allApps;  // Show all apps if we have 6 or fewer
+    return topApps;
   };
 
   const sortedApps = getFilteredApps();
@@ -267,7 +264,7 @@ const Statistics = () => {
             
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: '0.5rem' }}>
               <Text size="xl" style={{ color: '#00FFFF', marginRight: '10px' }}>
-                {formatTime(totalTodayScreenTime)} used
+                {formatTime(totalScreenTime)} used
               </Text>
               <Badge 
                 style={{ 
@@ -283,7 +280,7 @@ const Statistics = () => {
             <Text style={{ color: '#00FFFF' }}>
               {percentOfLimit >= 100 
                 ? 'You have reached your daily screen time limit!' 
-                : `${formatTime(screenTimeLimit - totalTodayScreenTime)} remaining of your ${formatTime(screenTimeLimit)} limit`}
+                : `${formatTime(screenTimeLimit - totalScreenTime)} remaining of your ${formatTime(screenTimeLimit)} limit`}
             </Text>
 
             <Text size="sm" style={{ color: '#AAAAAA', marginTop: '1rem', fontStyle: 'italic' }}>
@@ -297,11 +294,11 @@ const Statistics = () => {
               thickness={12}
               roundCaps
               sections={[
-                { value: (totalTodayScreenTime / screenTimeLimit) * 100, color: getStatusColor(percentOfLimit) },
+                { value: (totalScreenTime / screenTimeLimit) * 100, color: getStatusColor(percentOfLimit) },
               ]}
               label={
                 <Text size="lg" style={{ color: '#FF00FF', textAlign: 'center' }}>
-                  {Math.round((totalTodayScreenTime / screenTimeLimit) * 100)}%
+                  {Math.round((totalScreenTime / screenTimeLimit) * 100)}%
                 </Text>
               }
             />
@@ -330,7 +327,7 @@ const Statistics = () => {
           App Usage Breakdown
         </Title>
         
-        {sortedApps.length === 0 || totalTodayScreenTime === 0 ? (
+        {sortedApps.length === 0 || totalScreenTime === 0 ? (
           <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
             No app usage data recorded yet. Usage data will appear here as you use your device.
           </Text>
@@ -366,7 +363,7 @@ const Statistics = () => {
                     fill="#FF00FF"
                     shape={(props: any) => {
                       const { x, y, width, height, payload } = props;
-                      const color = getAppColor(payload.time, totalTodayScreenTime);
+                      const color = getAppColor(payload.time, totalScreenTime);
                       return (
                         <g>
                           <defs>
@@ -418,7 +415,7 @@ const Statistics = () => {
             {/* App Distribution Section */}
             <div style={{ marginTop: '1rem' }}>
               {sortedApps.map((app, index) => {
-                const color = getAppColor(app.time, totalTodayScreenTime);
+                const color = getAppColor(app.time, totalScreenTime);
                 return (
                   <div key={index} style={{ display: 'flex', alignItems: 'center', marginBottom: '0.75rem' }}>
                     <div
@@ -441,7 +438,7 @@ const Statistics = () => {
                       {formatTime(app.time)}
                     </Text>
                     <Text size="sm" style={{ color: '#AAAAAA', width: '50px', textAlign: 'right' }}>
-                      {Math.round((app.time / totalTodayScreenTime) * 100)}%
+                      {Math.round((app.time / totalScreenTime) * 100)}%
                     </Text>
                   </div>
                 );
