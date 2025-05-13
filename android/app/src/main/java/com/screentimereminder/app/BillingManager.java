@@ -203,6 +203,23 @@ public class BillingManager extends Plugin {
     }
 
     private void handlePurchases(BillingResult billingResult, List<Purchase> purchases) {
+        JSObject resultData = new JSObject();
+        resultData.put("responseCode", billingResult.getResponseCode());
+        resultData.put("debugMessage", billingResult.getDebugMessage());
+
+        if (purchases != null && !purchases.isEmpty()) {
+            JSONArray productIdsArray = new JSONArray();
+            for (Purchase p : purchases) {
+                // A single purchase object can be for one or more products (though typically one for INAPP)
+                for (String productId : p.getProducts()) {
+                    productIdsArray.put(productId);
+                }
+            }
+            resultData.put("productIds", productIdsArray);
+        }
+        // Notify listeners that the purchase flow launched by launchBillingFlow has finished.
+        notifyListeners("purchaseAttemptFinished", resultData);
+
         if (billingResult.getResponseCode() == BillingClient.BillingResponseCode.OK && purchases != null) {
             for (Purchase purchase : purchases) {
                 handlePurchase(purchase);
@@ -212,7 +229,6 @@ public class BillingManager extends Plugin {
 
     private void handlePurchase(Purchase purchase) {
         if (purchase.getPurchaseState() == Purchase.PurchaseState.PURCHASED) {
-            // Acknowledge the purchase if it hasn't been acknowledged yet
             if (!purchase.isAcknowledged()) {
                 AcknowledgePurchaseParams params = AcknowledgePurchaseParams.newBuilder()
                     .setPurchaseToken(purchase.getPurchaseToken())
@@ -220,13 +236,33 @@ public class BillingManager extends Plugin {
 
                 billingClient.acknowledgePurchase(params, billingResult -> {
                     if (billingResult.getResponseCode() == BillingClient.BillingResponseCode.OK) {
-                        savePurchase(purchase.getProducts());
+                        Log.d(TAG, "Purchase acknowledged successfully: " + purchase.getProducts());
+                        savePurchase(purchase.getProducts()); // Grant entitlement
+                    } else {
+                        Log.e(TAG, "Failed to acknowledge purchase: " + purchase.getProducts() +
+                                   ". Error: " + billingResult.getDebugMessage());
+                        // Do not save if acknowledgement fails.
+                        // The purchase will be re-processed by queryPurchases or next launch.
                     }
                 });
+            } else {
+                // Purchase already acknowledged
+                Log.d(TAG, "Purchase already acknowledged: " + purchase.getProducts());
+                savePurchase(purchase.getProducts()); // Already entitled
             }
-            
-            // Save the purchase
-            savePurchase(purchase.getProducts());
+        } else if (purchase.getPurchaseState() == Purchase.PurchaseState.PENDING) {
+            Log.d(TAG, "Purchase is pending: " + purchase.getProducts());
+            // You might want to notify the user or UI that the purchase is processing.
+            // For example:
+            // JSObject pendingData = new JSObject();
+            // pendingData.put("status", "pending");
+            // pendingData.put("products", new JSONArray(purchase.getProducts()));
+            // notifyListeners("purchasePending", pendingData);
+        } else if (purchase.getPurchaseState() == Purchase.PurchaseState.UNSPECIFIED_STATE) {
+            Log.e(TAG, "Purchase in unspecified state: " + purchase.getProducts());
+        } else {
+            Log.w(TAG, "Purchase in unhandled state: " + purchase.getPurchaseState() +
+                       " for products: " + purchase.getProducts());
         }
     }
 

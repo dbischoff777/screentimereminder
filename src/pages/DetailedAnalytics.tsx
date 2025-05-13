@@ -1,14 +1,14 @@
-import { Container, Title, Text, Grid, Tabs, Paper, Card, Badge, Stack, Group, Button, Modal, Loader } from '@mantine/core';
+import { Container, Title, Text, Grid, Tabs, Paper, Card, Badge, Stack, Group } from '@mantine/core';
 import { useScreenTime } from '../context/ScreenTimeContext';
 import { useState, useEffect } from 'react';
 import FocusTimer from '../components/FocusTimer';
 import { EmailReportSettings, EmailSettings } from '../components/EmailReportSettings';
 import { ReportScheduler } from '../services/reportScheduler';
 import { notifications } from '@mantine/notifications';
-import { usePurchases } from '../hooks/usePurchases';
+import { usePurchases, PurchaseState } from '../hooks/usePurchases';
 
 // Import testing mode constant for development
-const TESTING_MODE = false; // Should match the value in usePurchases.ts
+// const TESTING_MODE = false; // This is now handled in usePurchases.ts
 
 const DetailedAnalytics = () => {
   const { 
@@ -16,12 +16,17 @@ const DetailedAnalytics = () => {
     getTotalScreenTime, 
     screenTimeLimit
   } = useScreenTime();
-  const { loading, purchaseProduct, isTabUnlocked } = usePurchases();
+  const { 
+    // products, // products might be needed if we show prices before Play UI, but not for direct launch
+    purchases,
+    error: purchaseError, 
+    isProcessingPayment, 
+    purchaseProduct, 
+    isTabUnlocked
+  } = usePurchases();
   const [totalScreenTime, setTotalScreenTime] = useState(0);
   const [activeTab, setActiveTab] = useState<string | null>('heatmap');
-  const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
-  const [selectedTab, setSelectedTab] = useState<string | null>(null);
-  const [cornerTapCount, setCornerTapCount] = useState(0);
+  const [attemptingToUnlockTab, setAttemptingToUnlockTab] = useState<string | null>(null);
 
   // Add focus session tracking
   const [focusSessions, setFocusSessions] = useState<{
@@ -29,24 +34,6 @@ const DetailedAnalytics = () => {
     duration: number;
     timestamp: Date;
   }[]>([]);
-
-  // Handler for the hidden corner tap
-  const handleCornerTap = () => {
-    const newCount = cornerTapCount + 1;
-    console.log('PURCHASE-DEBUG: Corner tap count:', newCount);
-    
-    if (newCount >= 3) {
-      // Reset counter and force show modal
-      setTimeout(() => {
-        console.log('PURCHASE-DEBUG: Force showing purchase modal');
-        setSelectedTab('heatmap');
-        setPurchaseModalOpen(true);
-      }, 100);
-      setCornerTapCount(0);
-    } else {
-      setCornerTapCount(newCount);
-    }
-  };
 
   useEffect(() => {
     // Calculate total screen time
@@ -328,112 +315,120 @@ const DetailedAnalytics = () => {
     }
   };
 
-  const handleTabChange = (tab: string | null) => {
-    if (!tab) return;
+  const initiateDirectPurchase = async (tabKey: string) => {
+    if (isProcessingPayment) {
+      console.log('PURCHASE-DEBUG: Payment processing or Google Play UI is active.');
+      notifications.show({
+        title: 'Purchase in Progress',
+        message: 'Please complete or cancel the current purchase process.',
+        color: 'yellow'
+      });
+      return;
+    }
+
+    const productId = `${tabKey}_tab`;
+    console.log(`PURCHASE-DEBUG: Initiating direct purchase for ${productId}`);
+    setAttemptingToUnlockTab(tabKey);
+
+    notifications.show({
+      id: 'purchase-processing', // Unique ID to update/hide later
+      title: 'Processing Purchase',
+      message: `Connecting to the store for ${tabKey}...`,
+      loading: true,
+      autoClose: false,
+    });
+
+    const didLaunch = await purchaseProduct(productId);
+
+    if (!didLaunch) {
+      notifications.update({
+        id: 'purchase-processing',
+        title: 'Purchase Error',
+        message: `Could not initiate purchase for ${tabKey}. Please check your connection and try again.`,
+        color: 'red',
+        loading: false,
+        autoClose: 5000,
+      });
+      setAttemptingToUnlockTab(null); // Clear attempt if launch failed
+    }
+    // If didLaunch is true, the 'purchase-processing' notification will be handled by useEffects below
+  };
+
+  const handleTabChange = (newlySelectedTabValue: string | null) => {
+    if (!newlySelectedTabValue) return;
     
-    console.log('PURCHASE-DEBUG: Tab change requested:', tab);
+    console.log('PURCHASE-DEBUG: Tab change requested:', newlySelectedTabValue);
+
+    if (newlySelectedTabValue === 'settings') {
+      console.log('PURCHASE-DEBUG: Settings tab selected - always unlocked');
+      setActiveTab(newlySelectedTabValue);
+      setAttemptingToUnlockTab(null);
+      return;
+    }
     
-    try {
-      // Add a button click sound or some visual feedback that the tab was clicked
-      if (tab === 'settings') {
-        // Settings tab is always unlocked
-        console.log('PURCHASE-DEBUG: Settings tab selected - always unlocked');
-        setActiveTab(tab);
-        return;
-      }
-      
-      const tabId = `${tab}_tab`;
-      console.log('PURCHASE-DEBUG: Checking unlock status for', tabId);
-      
-      // First check if the tab is unlocked
-      const unlocked = isTabUnlocked(tabId);
-      console.log('PURCHASE-DEBUG: Tab locked status result:', unlocked ? 'UNLOCKED' : 'LOCKED');
-      
-      if (unlocked) {
-        console.log('PURCHASE-DEBUG: Tab is unlocked, activating tab');
-        setActiveTab(tab);
-      } else {
-        console.log('PURCHASE-DEBUG: Tab is locked, opening purchase modal');
-        
-        // Force render the purchase modal
-        setSelectedTab(tab);
-        setPurchaseModalOpen(true);
-        
-        // Force log the state to ensure we're setting it correctly
-        console.log('PURCHASE-DEBUG: Selected tab set to:', tab);
-        console.log('PURCHASE-DEBUG: Purchase modal opened:', true);
-      }
-    } catch (error) {
-      console.error('PURCHASE-DEBUG: Error in handleTabChange:', error);
+    const tabId = `${newlySelectedTabValue}_tab`;
+    if (isTabUnlocked(tabId)) {
+      console.log(`PURCHASE-DEBUG: Tab ${newlySelectedTabValue} is unlocked, activating.`);
+      setActiveTab(newlySelectedTabValue);
+      setAttemptingToUnlockTab(null);
+    } else {
+      console.log(`PURCHASE-DEBUG: Tab ${newlySelectedTabValue} is locked. Initiating direct purchase.`);
+      // Don't set activeTab here. Let the purchase flow handle it if successful.
+      initiateDirectPurchase(newlySelectedTabValue);
     }
   };
 
-  const handlePurchase = async (productId: string) => {
-    console.log('PURCHASE-DEBUG: Purchase initiated for:', productId);
-    try {
-      const success = await purchaseProduct(productId);
-      console.log('PURCHASE-DEBUG: Purchase result:', success);
-      
-      if (success && selectedTab) {
-        console.log('PURCHASE-DEBUG: Purchase successful, activating tab:', selectedTab);
-        setActiveTab(selectedTab);
-        setPurchaseModalOpen(false);
+  // Effect to handle successful unlock and tab activation
+  useEffect(() => {
+    if (attemptingToUnlockTab && purchases && purchases[attemptingToUnlockTab + '_tab' as keyof PurchaseState]) {
+      // Check specific tab or all_tabs_bundle
+      const tabId = `${attemptingToUnlockTab}_tab`;
+      if (isTabUnlocked(tabId)) { // Re-check with isTabUnlocked for consistent logic (includes all_tabs_bundle)
+        console.log(`PURCHASE-DEBUG: Tab ${attemptingToUnlockTab} successfully unlocked via purchase update, activating it.`);
+        setActiveTab(attemptingToUnlockTab);
+        notifications.hide('purchase-processing');
+        notifications.show({
+          title: 'Purchase Successful',
+          message: `The ${attemptingToUnlockTab} tab is now unlocked!`,
+          color: 'green',
+        });
+        setAttemptingToUnlockTab(null); // Clear the attempt
       }
-    } catch (error) {
-      console.error('PURCHASE-DEBUG: Error during purchase:', error);
     }
-  };
+  }, [purchases, attemptingToUnlockTab, isTabUnlocked, setActiveTab]); // purchases from usePurchases is the key trigger
 
-  // Handler for the debug button
-  const handleDebugButtonClick = () => {
-    console.log('PURCHASE-DEBUG: Debug button clicked');
-    
-    // Try to show the modal
-    setSelectedTab('heatmap');
-    setPurchaseModalOpen(true);
-    
-    // Wait a bit and check if the modal is visible
-    setTimeout(() => {
-      // Show a simple alert as fallback to ensure something is visible
-      alert(`Testing Purchase Flow\n\nWould you like to purchase: ${selectedTab || 'heatmap'}_tab?`);
-    }, 500);
-  };
+  // Effect to handle purchase cancellation or failure after Play Store UI is dismissed
+  useEffect(() => {
+    if (attemptingToUnlockTab && !isProcessingPayment) {
+      // If payment processing is finished, and we were attempting to unlock a tab,
+      // but the previous effect didn't confirm it as unlocked and clear `attemptingToUnlockTab`.
+      const tabId = `${attemptingToUnlockTab}_tab`;
+      if (!isTabUnlocked(tabId)) { // Check if it's still locked
+        console.log(`PURCHASE-DEBUG: Payment flow ended for ${attemptingToUnlockTab}, but tab is still locked. (Cancelled/Failed)`);
+        notifications.hide('purchase-processing');
+        notifications.show({
+          title: 'Purchase Incomplete',
+          message: `The purchase for the ${attemptingToUnlockTab} tab was not completed.`,
+          color: 'orange',
+          autoClose: 5000,
+        });
+        setAttemptingToUnlockTab(null); // Clear the attempt
+      }
+    }
+  }, [isProcessingPayment, attemptingToUnlockTab, isTabUnlocked]);
 
-  // Component for testing purchases directly
-  const PurchaseTestUI = () => {
-    if (!TESTING_MODE) return null;
-    
-    const directPurchase = (productId: string) => {
-      console.log('PURCHASE-DEBUG: Direct purchase for:', productId);
-      handlePurchase(productId);
-    };
-    
-    return (
-      <div style={{ 
-        position: 'fixed', 
-        top: '70px', 
-        right: '10px', 
-        zIndex: 9999,
-        background: 'rgba(0,0,0,0.8)', 
-        padding: '10px',
-        borderRadius: '5px',
-        border: '1px solid #FF00FF'
-      }}>
-        <Text style={{ color: 'white', marginBottom: '5px', fontSize: '12px' }}>Direct Testing</Text>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-          <Button size="xs" onClick={() => directPurchase('heatmap_tab')}>
-            Buy Heatmap
-          </Button>
-          <Button size="xs" onClick={() => directPurchase('timeline_tab')}>
-            Buy Timeline
-          </Button>
-          <Button size="xs" onClick={() => directPurchase('all_tabs_bundle')}>
-            Buy Bundle
-          </Button>
-        </div>
-      </div>
-    );
-  };
+  // Effect to show general purchase errors from the hook
+  useEffect(() => {
+    if (purchaseError) {
+      notifications.hide('purchase-processing'); // Hide any processing notification
+      notifications.show({
+        title: 'Purchase System Error',
+        message: purchaseError,
+        color: 'red',
+      });
+      // Optionally clear error in hook or here after showing
+    }
+  }, [purchaseError]);
 
   return (
     <Container 
@@ -449,59 +444,6 @@ const DetailedAnalytics = () => {
         overflowY: 'visible'
       }}
     >
-      <PurchaseTestUI />
-      
-      {/* Hidden gesture area to force show purchase modal */}
-      <div 
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          width: '60px',
-          height: '60px',
-          zIndex: 1000,
-        }}
-        onClick={handleCornerTap}
-      />
-      
-      {/* Debug button for testing purchase modal */}
-      {TESTING_MODE && (
-        <>
-          <Button
-            onClick={handleDebugButtonClick}
-            style={{
-              position: 'absolute',
-              top: '10px',
-              right: '10px',
-              zIndex: 1000,
-              background: 'red'
-            }}
-            size="xs"
-          >
-            Test Modal
-          </Button>
-          
-          <Button
-            onClick={() => {
-              console.log('PURCHASE-DEBUG: Direct purchase button clicked');
-              // Directly call purchase without showing modal
-              const tabToPurchase = 'heatmap_tab';
-              handlePurchase(tabToPurchase);
-            }}
-            style={{
-              position: 'absolute',
-              top: '40px',
-              right: '10px',
-              zIndex: 1000,
-              background: 'green'
-            }}
-            size="xs"
-          >
-            Buy Direct
-          </Button>
-        </>
-      )}
-
       <Title
         order={1}
         style={{
@@ -542,6 +484,10 @@ const DetailedAnalytics = () => {
               display: 'none' // Chrome/Safari/Opera
             },
             WebkitOverflowScrolling: 'touch', // Smooth scrolling on iOS
+            // Disable tab list interaction while Google Play UI is active
+            pointerEvents: isProcessingPayment ? 'none' : 'auto',
+            opacity: isProcessingPayment ? 0.7 : 1,
+            transition: 'opacity 0.3s ease' // Smooth transition for opacity
           },
           tab: {
             flex: '0 0 auto',
@@ -594,75 +540,30 @@ const DetailedAnalytics = () => {
           <Tabs.Tab 
             value="heatmap"
             data-locked={!isTabUnlocked('heatmap_tab')}
-            onClick={(e) => {
-              if (!isTabUnlocked('heatmap_tab')) {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('PURCHASE-DEBUG: Heatmap tab clicked directly - opening modal');
-                setSelectedTab('heatmap');
-                setPurchaseModalOpen(true);
-              }
-            }}
           >
             HEATMAP {!isTabUnlocked('heatmap_tab') && '🔒'}
           </Tabs.Tab>
           <Tabs.Tab 
             value="timeline"
             data-locked={!isTabUnlocked('timeline_tab')}
-            onClick={(e) => {
-              if (!isTabUnlocked('timeline_tab')) {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('PURCHASE-DEBUG: Timeline tab clicked directly - opening modal');
-                setSelectedTab('timeline');
-                setPurchaseModalOpen(true);
-              }
-            }}
           >
             TIMELINE {!isTabUnlocked('timeline_tab') && '🔒'}
           </Tabs.Tab>
           <Tabs.Tab 
             value="insights"
             data-locked={!isTabUnlocked('insights_tab')}
-            onClick={(e) => {
-              if (!isTabUnlocked('insights_tab')) {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('PURCHASE-DEBUG: Insights tab clicked directly - opening modal');
-                setSelectedTab('insights');
-                setPurchaseModalOpen(true);
-              }
-            }}
           >
             INSIGHTS {!isTabUnlocked('insights_tab') && '🔒'}
           </Tabs.Tab>
           <Tabs.Tab 
             value="details"
             data-locked={!isTabUnlocked('details_tab')}
-            onClick={(e) => {
-              if (!isTabUnlocked('details_tab')) {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('PURCHASE-DEBUG: Details tab clicked directly - opening modal');
-                setSelectedTab('details');
-                setPurchaseModalOpen(true);
-              }
-            }}
           >
             DETAILS {!isTabUnlocked('details_tab') && '🔒'}
           </Tabs.Tab>
           <Tabs.Tab 
             value="focus"
             data-locked={!isTabUnlocked('focus_tab')}
-            onClick={(e) => {
-              if (!isTabUnlocked('focus_tab')) {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('PURCHASE-DEBUG: Focus tab clicked directly - opening modal');
-                setSelectedTab('focus');
-                setPurchaseModalOpen(true);
-              }
-            }}
           >
             FOCUS {!isTabUnlocked('focus_tab') && '🔒'}
           </Tabs.Tab>
@@ -1433,108 +1334,6 @@ const DetailedAnalytics = () => {
           </div>
         </Tabs.Panel>
       </Tabs>
-
-      {/* Purchase Modal */}
-      <Modal
-        opened={purchaseModalOpen}
-        onClose={() => setPurchaseModalOpen(false)}
-        title="Unlock Advanced Features"
-        style={{ zIndex: 9999 }}
-        centered
-        withCloseButton
-        radius="md"
-        shadow="xl"
-        size="md"
-        closeButtonProps={{
-          size: 'lg'
-        }}
-        overlayProps={{
-          opacity: 0.8
-        }}
-        styles={{
-          title: {
-            color: '#00FFFF',
-            fontSize: '1.5rem',
-            textAlign: 'center',
-            width: '100%'
-          },
-          content: {
-            background: '#000020',
-            border: '2px solid #FF00FF',
-            zIndex: 10000 // Ensure it's on top
-          },
-          header: {
-            background: 'rgba(255, 0, 255, 0.1)',
-            padding: '1rem',
-            marginBottom: '1rem'
-          },
-          body: {
-            color: '#FFFFFF',
-            padding: '1rem'
-          },
-          close: {
-            color: '#FFFFFF',
-            '&:hover': {
-              background: 'rgba(255, 255, 255, 0.1)'
-            }
-          },
-          overlay: {
-            backdropFilter: 'blur(3px)',
-            background: 'rgba(0, 0, 20, 0.8)',
-            zIndex: 9998
-          }
-        }}
-      >
-        <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-          <Text size="lg" style={{ marginBottom: '1rem' }}>
-            Unlock additional features to get deeper insights into your screen time usage.
-          </Text>
-          
-          {loading ? (
-            <Loader color="#00FFFF" />
-          ) : (
-            <Stack>
-              {/* Individual tab purchase */}
-              {selectedTab && (
-                <Button
-                  fullWidth
-                  size="lg"
-                  onClick={() => handlePurchase(`${selectedTab}_tab`)}
-                  style={{
-                    background: 'linear-gradient(45deg, #FF00FF, #00FFFF)',
-                    marginBottom: '1rem',
-                    padding: '1rem',
-                    fontWeight: 'bold'
-                  }}
-                >
-                  Unlock {selectedTab.toUpperCase()} Tab - €1.99
-                </Button>
-              )}
-              
-              {/* Bundle purchase */}
-              <Button
-                fullWidth
-                size="lg"
-                variant="outline"
-                onClick={() => handlePurchase('all_tabs_bundle')}
-                style={{
-                  borderColor: '#FF00FF',
-                  color: '#FF00FF',
-                  borderWidth: '2px',
-                  padding: '1rem',
-                  fontWeight: 'bold'
-                }}
-              >
-                Unlock All Tabs - €4.99
-              </Button>
-              
-              <Text size="sm" style={{ color: '#AAAAAA', marginTop: '1rem' }}>
-                One-time purchase, no subscription required
-              </Text>
-            </Stack>
-          )}
-        </div>
-      </Modal>
 
       <style>
         {`
