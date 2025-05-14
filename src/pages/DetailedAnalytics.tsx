@@ -356,25 +356,26 @@ const DetailedAnalytics = () => {
 
   const handleTabChange = (newlySelectedTabValue: string | null) => {
     if (!newlySelectedTabValue) return;
-    
+
     console.log('PURCHASE-DEBUG: Tab change requested:', newlySelectedTabValue);
 
+    // Always set the active tab when a tab is clicked.
+    setActiveTab(newlySelectedTabValue);
+    // Clear any ongoing unlock attempt for a *previous* tab, as we are now focusing on the newlySelectedTabValue.
+    // initiateDirectPurchase will set this again if the *new* tab is locked.
+    setAttemptingToUnlockTab(null); 
+
     if (newlySelectedTabValue === 'settings') {
-      console.log('PURCHASE-DEBUG: Settings tab selected - always unlocked');
-      setActiveTab(newlySelectedTabValue);
-      setAttemptingToUnlockTab(null);
+      console.log('PURCHASE-DEBUG: Settings tab selected - always unlocked. Active tab set.');
       return;
     }
     
-    const tabId = `${newlySelectedTabValue}_tab`;
-    if (isTabUnlocked(tabId)) {
-      console.log(`PURCHASE-DEBUG: Tab ${newlySelectedTabValue} is unlocked, activating.`);
-      setActiveTab(newlySelectedTabValue);
-      setAttemptingToUnlockTab(null);
+    const tabId = `${newlySelectedTabValue}_tab`; // e.g., "heatmap_tab"
+    if (!isTabUnlocked(tabId)) {
+      console.log(`PURCHASE-DEBUG: Tab ${newlySelectedTabValue} is locked. Active tab set. Initiating direct purchase.`);
+      initiateDirectPurchase(newlySelectedTabValue); // `newlySelectedTabValue` here is the tab key like "heatmap"
     } else {
-      console.log(`PURCHASE-DEBUG: Tab ${newlySelectedTabValue} is locked. Initiating direct purchase.`);
-      // Don't set activeTab here. Let the purchase flow handle it if successful.
-      initiateDirectPurchase(newlySelectedTabValue);
+      console.log(`PURCHASE-DEBUG: Tab ${newlySelectedTabValue} is unlocked. Active tab set.`);
     }
   };
 
@@ -487,7 +488,9 @@ const DetailedAnalytics = () => {
             // Disable tab list interaction while Google Play UI is active
             pointerEvents: isProcessingPayment ? 'none' : 'auto',
             opacity: isProcessingPayment ? 0.7 : 1,
-            transition: 'opacity 0.3s ease' // Smooth transition for opacity
+            transition: 'opacity 0.3s ease',
+            position: 'relative', // Ensure stacking context
+            zIndex: 2, // Stack above panels
           },
           tab: {
             flex: '0 0 auto',
@@ -574,8 +577,55 @@ const DetailedAnalytics = () => {
           <div style={{ 
             maxWidth: '100%',
             margin: '0 auto',
-            padding: '0 1rem'
+            padding: '0 1rem',
+            position: 'relative', // Added for positioning the lock message
+            filter: !isTabUnlocked('heatmap_tab') ? 'blur(10px)' : 'none',
+            pointerEvents: !isTabUnlocked('heatmap_tab') ? 'none' : 'auto',
+            transition: 'filter 0.3s ease-in-out' // Smooth transition for blur
           }}>
+            {!isTabUnlocked('heatmap_tab') && (
+              <Paper
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  padding: '2rem',
+                  background: 'rgba(0, 0, 32, 0.7)',
+                  borderRadius: '8px',
+                  textAlign: 'center',
+                  zIndex: 10, // Ensure it's above the blurred content
+                  pointerEvents: 'auto' // Allow interaction with the message/button
+                }}
+              >
+                <Title order={3} style={{ color: '#FF00FF', marginBottom: '1rem' }}>
+                  Unlock Heatmap
+                </Title>
+                <Text style={{ color: '#00FFFF', marginBottom: '1.5rem' }}>
+                  Purchase this feature to view your usage heatmap.
+                </Text>
+                <button 
+                  onClick={() => initiateDirectPurchase('heatmap')}
+                  disabled={isProcessingPayment || attemptingToUnlockTab === 'heatmap'}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    fontSize: '1rem',
+                    color: '#FFFFFF',
+                    backgroundColor: '#FF00FF',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    boxShadow: '0 0 10px #FF00FF',
+                    transition: 'all 0.2s ease',
+                    opacity: (isProcessingPayment || attemptingToUnlockTab === 'heatmap') ? 0.5 : 1,
+                  }}
+                >
+                  {isProcessingPayment && attemptingToUnlockTab === 'heatmap' 
+                    ? 'Processing...' 
+                    : 'Unlock Now'}
+                </button>
+              </Paper>
+            )}
             <Title
               order={2}
               style={{
@@ -786,477 +836,676 @@ const DetailedAnalytics = () => {
         </Tabs.Panel>
 
         <Tabs.Panel value="timeline" data-active-tab="timeline">
-          <Title
-            order={2}
-            style={{
-              fontSize: '1.5rem',
-              marginBottom: '0.5rem',
-              color: '#00FFFF',
-            }}
-          >
-            Usage Timeline
-          </Title>
-          <Text size="sm" style={{ color: '#AAAAAA', marginBottom: '2rem' }}>
-            Daily Activity Log
-          </Text>
+          <div style={{
+            position: 'relative', // Added for positioning the lock message
+            filter: !isTabUnlocked('timeline_tab') ? 'blur(10px)' : 'none',
+            pointerEvents: !isTabUnlocked('timeline_tab') ? 'none' : 'auto',
+            transition: 'filter 0.3s ease-in-out' // Smooth transition for blur
+          }}>
+            {!isTabUnlocked('timeline_tab') && (
+              <Paper
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  padding: '2rem',
+                  background: 'rgba(0, 0, 32, 0.7)',
+                  borderRadius: '8px',
+                  textAlign: 'center',
+                  zIndex: 10,
+                  pointerEvents: 'auto'
+                }}
+              >
+                <Title order={3} style={{ color: '#FF00FF', marginBottom: '1rem' }}>
+                  Unlock Timeline
+                </Title>
+                <Text style={{ color: '#00FFFF', marginBottom: '1.5rem' }}>
+                  Purchase this feature to view your usage timeline.
+                </Text>
+                <button
+                  onClick={() => initiateDirectPurchase('timeline')}
+                  disabled={isProcessingPayment || attemptingToUnlockTab === 'timeline'}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    fontSize: '1rem',
+                    color: '#FFFFFF',
+                    backgroundColor: '#FF00FF',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    boxShadow: '0 0 10px #FF00FF',
+                    transition: 'all 0.2s ease',
+                    opacity: (isProcessingPayment || attemptingToUnlockTab === 'timeline') ? 0.5 : 1,
+                  }}
+                >
+                  {isProcessingPayment && attemptingToUnlockTab === 'timeline'
+                    ? 'Processing...'
+                    : 'Unlock Now'}
+                </button>
+              </Paper>
+            )}
+            <Title
+              order={2}
+              style={{
+                fontSize: '1.5rem',
+                marginBottom: '0.5rem',
+                color: '#00FFFF',
+              }}
+            >
+              Usage Timeline
+            </Title>
+            <Text size="sm" style={{ color: '#AAAAAA', marginBottom: '2rem' }}>
+              Daily Activity Log
+            </Text>
 
-          <div style={{ maxHeight: '600px', overflowY: 'auto', padding: '0 1rem' }}>
-            {sortedTimelineData.length === 0 ? (
-              <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
-                No activity history available for today.
-              </Text>
-            ) : (
-              <div style={{ position: 'relative' }}>
-                {/* Date header */}
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center',
-                  marginBottom: '1.5rem',
-                  marginLeft: '80px'
-                }}>
-                  <Text style={{ color: '#FFFFFF', fontWeight: 500 }}>
-                    {new Date().toLocaleDateString('en-US', { 
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric'
-                    })}
-                  </Text>
-                </div>
-
-                {/* Timeline entries */}
+            <div style={{ maxHeight: '600px', overflowY: 'auto', padding: '0 1rem' }}>
+              {sortedTimelineData.length === 0 ? (
+                <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
+                  No activity history available for today.
+                </Text>
+              ) : (
                 <div style={{ position: 'relative' }}>
-                  {/* Continuous timeline line */}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: '80px',
-                      top: 0,
-                      bottom: 0,
-                      width: '2px',
-                      background: '#FF4444',
-                    }}
-                  />
-                  
-                  {sortedTimelineData.map((app, index) => (
+                  {/* Date header */}
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'center',
+                    marginBottom: '1.5rem',
+                    marginLeft: '80px'
+                  }}>
+                    <Text style={{ color: '#FFFFFF', fontWeight: 500 }}>
+                      {new Date().toLocaleDateString('en-US', { 
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })}
+                    </Text>
+                  </div>
+
+                  {/* Timeline entries */}
+                  <div style={{ position: 'relative' }}>
+                    {/* Continuous timeline line */}
                     <div
-                      key={index}
                       style={{
-                        display: 'flex',
+                        position: 'absolute',
+                        left: '80px',
+                        top: 0,
+                        bottom: 0,
+                        width: '2px',
+                        background: '#FF4444',
+                      }}
+                    />
+                    
+                    {sortedTimelineData.map((app, index) => (
+                      <div
+                        key={index}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          marginBottom: '1.5rem',
+                          position: 'relative',
+                        }}
+                      >
+                        {/* Time */}
+                        <Text style={{ 
+                          width: '60px', 
+                          color: '#AAAAAA',
+                          fontSize: '0.9rem',
+                          marginRight: '20px',
+                          textAlign: 'right',
+                          fontWeight: 500
+                        }}>
+                          {formatTimelineTime(app.lastUsed)}
+                        </Text>
+                        
+                        {/* App icon container */}
+                        <div style={{
+                          position: 'relative',
+                          zIndex: 2,
+                          background: '#FFFFFF',
+                          borderRadius: '50%',
+                          padding: '2px',
+                          marginRight: '16px'
+                        }}>
+                          {app.icon ? (
+                            <img
+                              src={`data:image/png;base64,${app.icon}`}
+                              alt={app.name}
+                              style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '50%',
+                                objectFit: 'cover'
+                              }}
+                            />
+                          ) : (
+                            <div style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '50%',
+                              background: app.color,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '16px',
+                              color: '#FFFFFF'
+                            }}>
+                              {app.name.charAt(0)}
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* App info */}
+                        <div style={{ flex: 1 }}>
+                          <Text style={{ 
+                            color: '#FFFFFF', 
+                            fontWeight: 500,
+                            marginBottom: '4px'
+                          }}>
+                            {app.name}
+                          </Text>
+                          <Text size="sm" style={{ color: '#AAAAAA' }}>
+                            {formatDetailedTime(app.time)}
+                          </Text>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="insights" data-active-tab="insights">
+          <div style={{
+            position: 'relative', // Added for positioning the lock message
+            filter: !isTabUnlocked('insights_tab') ? 'blur(10px)' : 'none',
+            pointerEvents: !isTabUnlocked('insights_tab') ? 'none' : 'auto',
+            transition: 'filter 0.3s ease-in-out' // Smooth transition for blur
+          }}>
+            {!isTabUnlocked('insights_tab') && (
+              <Paper
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  padding: '2rem',
+                  background: 'rgba(0, 0, 32, 0.7)',
+                  borderRadius: '8px',
+                  textAlign: 'center',
+                  zIndex: 10,
+                  pointerEvents: 'auto'
+                }}
+              >
+                <Title order={3} style={{ color: '#FF00FF', marginBottom: '1rem' }}>
+                  Unlock Insights
+                </Title>
+                <Text style={{ color: '#00FFFF', marginBottom: '1.5rem' }}>
+                  Purchase this feature to view your usage insights.
+                </Text>
+                <button
+                  onClick={() => initiateDirectPurchase('insights')}
+                  disabled={isProcessingPayment || attemptingToUnlockTab === 'insights'}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    fontSize: '1rem',
+                    color: '#FFFFFF',
+                    backgroundColor: '#FF00FF',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    boxShadow: '0 0 10px #FF00FF',
+                    transition: 'all 0.2s ease',
+                    opacity: (isProcessingPayment || attemptingToUnlockTab === 'insights') ? 0.5 : 1,
+                  }}
+                >
+                  {isProcessingPayment && attemptingToUnlockTab === 'insights'
+                    ? 'Processing...'
+                    : 'Unlock Now'}
+                </button>
+              </Paper>
+            )}
+            {/* Usage Insights Dashboard */}
+            <div style={{
+              padding: '1.5rem',
+              background: 'transparent',
+              borderTop: '1px solid #FF00FF',
+              borderBottom: '1px solid #FF00FF',
+              marginBottom: '1.5rem',
+            }}>
+              <Title
+                order={3}
+                style={{
+                  color: '#FF00FF',
+                  marginBottom: '1.5rem',
+                  textShadow: '0 0 5px #FF00FF',
+                }}
+              >
+                Usage Insights
+              </Title>
+
+              <Grid>
+                {/* Productivity Score */}
+                <Grid.Col span={12}>
+                  <Paper
+                    style={{
+                      background: 'rgba(0, 0, 32, 0.3)',
+                      padding: '1.5rem',
+                      borderRadius: '8px',
+                      marginBottom: '1.5rem'
+                    }}
+                  >
+                    <div style={{ textAlign: 'center' }}>
+                      <Text size="xl" fw={700} style={{ color: '#00FFFF', marginBottom: '1rem' }}>
+                        Productivity Score
+                      </Text>
+                      <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'center', 
                         alignItems: 'center',
-                        marginBottom: '1.5rem',
-                        position: 'relative',
+                        gap: '1rem',
+                        marginBottom: '1rem'
+                      }}>
+                        <Text size="3rem" style={{ 
+                          color: getProductivityColor(productivityScore),
+                          fontWeight: 700,
+                          textShadow: `0 0 10px ${getProductivityColor(productivityScore)}`
+                        }}>
+                          {productivityScore}
+                        </Text>
+                        <Badge 
+                          size="lg"
+                          style={{ 
+                            backgroundColor: getProductivityColor(productivityScore),
+                            color: '#000000'
+                          }}
+                        >
+                          {getProductivityLabel(productivityScore)}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    {/* Category Distribution */}
+                    <div style={{ marginTop: '2rem' }}>
+                      <Text fw={500} style={{ color: '#FFFFFF', marginBottom: '1rem' }}>
+                        Category Distribution
+                      </Text>
+                      {categoryDistribution.map(({ category, time, percentage }) => (
+                        <div key={category} style={{ marginBottom: '1rem' }}>
+                          <div style={{ 
+                            display: 'flex', 
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            marginBottom: '0.5rem'
+                          }}>
+                            <Text size="sm" style={{ color: '#FFFFFF' }}>{category}</Text>
+                            <Text size="sm" style={{ color: '#AAAAAA' }}>{formatDetailedTime(time)} ({percentage}%)</Text>
+                          </div>
+                          <div style={{ 
+                            width: '100%',
+                            height: '4px',
+                            backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                            borderRadius: '2px',
+                            overflow: 'hidden'
+                          }}>
+                            <div style={{
+                              width: `${percentage}%`,
+                              height: '100%',
+                              backgroundColor: categoryColors[category as keyof typeof categoryColors] || '#FFFFFF',
+                              transition: 'width 0.3s ease'
+                            }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </Paper>
+                </Grid.Col>
+
+                {/* Most Used App */}
+                <Grid.Col span={6}>
+                  <Paper
+                    style={{
+                      background: 'rgba(0, 0, 32, 0.3)',
+                      padding: '1rem',
+                      borderRadius: '8px',
+                      height: '100%'
+                    }}
+                  >
+                    <Text size="lg" fw={700} style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
+                      Most Used App
+                    </Text>
+                    {mostUsedApp ? (
+                      <>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
+                          {mostUsedApp.icon ? (
+                            <img
+                              src={`data:image/png;base64,${mostUsedApp.icon}`}
+                              alt={mostUsedApp.name}
+                              style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '8px'
+                              }}
+                            />
+                          ) : (
+                            <div style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '8px',
+                              backgroundColor: mostUsedApp.color,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#FFFFFF'
+                            }}>
+                              {mostUsedApp.name.charAt(0)}
+                            </div>
+                          )}
+                          <Text style={{ color: '#FFFFFF' }}>{mostUsedApp.name}</Text>
+                        </div>
+                        <Text size="sm" style={{ color: '#AAAAAA' }}>
+                          {formatDetailedTime(mostUsedApp.time)} ({Math.round((mostUsedApp.time / totalScreenTime) * 100)}% of total)
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={{ color: '#AAAAAA' }}>No data available</Text>
+                    )}
+                  </Paper>
+                </Grid.Col>
+
+                {/* Peak Usage Time */}
+                <Grid.Col span={6}>
+                  <Paper
+                    style={{
+                      background: 'rgba(0, 0, 32, 0.3)',
+                      padding: '1rem',
+                      borderRadius: '8px',
+                      height: '100%'
+                    }}
+                  >
+                    <Text size="lg" fw={700} style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
+                      Peak Usage Time
+                    </Text>
+                    {heatmapData.some(value => value > 0) ? (
+                      <>
+                        <Text style={{ color: '#FFFFFF', marginBottom: '0.5rem' }}>
+                          {formatHour(heatmapData.indexOf(Math.max(...heatmapData)))}
+                        </Text>
+                        <Text size="sm" style={{ color: '#AAAAAA' }}>
+                          {Math.round(Math.max(...heatmapData))} minutes of activity
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={{ color: '#AAAAAA' }}>No data available</Text>
+                    )}
+                  </Paper>
+                </Grid.Col>
+
+                {/* Usage Pattern */}
+                <Grid.Col span={6}>
+                  <Paper
+                    style={{
+                      background: 'rgba(0, 0, 32, 0.3)',
+                      padding: '1rem',
+                      borderRadius: '8px',
+                      height: '100%'
+                    }}
+                  >
+                    <Text size="lg" fw={700} style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
+                      Usage Pattern
+                    </Text>
+                    {totalScreenTime > 0 ? (
+                      <>
+                        <Text style={{ color: '#FFFFFF', marginBottom: '0.5rem' }}>
+                          {totalScreenTime > screenTimeLimit ? 'Heavy' :
+                           totalScreenTime > screenTimeLimit * 0.75 ? 'Moderate' : 'Light'} Usage
+                        </Text>
+                        <Text size="sm" style={{ color: '#AAAAAA' }}>
+                          {Math.round((totalScreenTime / screenTimeLimit) * 100)}% of daily limit
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={{ color: '#AAAAAA' }}>No data available</Text>
+                    )}
+                  </Paper>
+                </Grid.Col>
+
+                {/* App Diversity */}
+                <Grid.Col span={6}>
+                  <Paper
+                    style={{
+                      background: 'rgba(0, 0, 32, 0.3)',
+                      padding: '1rem',
+                      borderRadius: '8px',
+                      height: '100%'
+                    }}
+                  >
+                    <Text size="lg" fw={700} style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
+                      App Diversity
+                    </Text>
+                    {sortedTimelineData.length > 0 ? (
+                      <>
+                        <Text style={{ color: '#FFFFFF', marginBottom: '0.5rem' }}>
+                          {sortedTimelineData.length} apps used today
+                        </Text>
+                        <Text size="sm" style={{ color: '#AAAAAA' }}>
+                          Most active: {sortedTimelineData.slice(0, 3).map(app => app.name).join(', ')}
+                        </Text>
+                      </>
+                    ) : (
+                      <Text style={{ color: '#AAAAAA' }}>No data available</Text>
+                    )}
+                  </Paper>
+                </Grid.Col>
+              </Grid>
+            </div>
+          </div>
+        </Tabs.Panel>
+
+        <Tabs.Panel value="details" data-active-tab="details">
+          <div style={{
+            position: 'relative', // Added for positioning the lock message
+            filter: !isTabUnlocked('details_tab') ? 'blur(10px)' : 'none',
+            pointerEvents: !isTabUnlocked('details_tab') ? 'none' : 'auto',
+            transition: 'filter 0.3s ease-in-out' // Smooth transition for blur
+          }}>
+            {!isTabUnlocked('details_tab') && (
+              <Paper
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  padding: '2rem',
+                  background: 'rgba(0, 0, 32, 0.7)',
+                  borderRadius: '8px',
+                  textAlign: 'center',
+                  zIndex: 10,
+                  pointerEvents: 'auto'
+                }}
+              >
+                <Title order={3} style={{ color: '#FF00FF', marginBottom: '1rem' }}>
+                  Unlock Details
+                </Title>
+                <Text style={{ color: '#00FFFF', marginBottom: '1.5rem' }}>
+                  Purchase this feature to view detailed app usage.
+                </Text>
+                <button
+                  onClick={() => initiateDirectPurchase('details')}
+                  disabled={isProcessingPayment || attemptingToUnlockTab === 'details'}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    fontSize: '1rem',
+                    color: '#FFFFFF',
+                    backgroundColor: '#FF00FF',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    boxShadow: '0 0 10px #FF00FF',
+                    transition: 'all 0.2s ease',
+                    opacity: (isProcessingPayment || attemptingToUnlockTab === 'details') ? 0.5 : 1,
+                  }}
+                >
+                  {isProcessingPayment && attemptingToUnlockTab === 'details'
+                    ? 'Processing...'
+                    : 'Unlock Now'}
+                </button>
+              </Paper>
+            )}
+            <Title
+              order={2}
+              style={{
+                fontSize: '1.5rem',
+                marginBottom: '0.5rem',
+                color: '#00FFFF',
+              }}
+            >
+              Detailed App Usage
+            </Title>
+            <Text size="sm" style={{ color: '#AAAAAA', marginBottom: '2rem' }}>
+              Detailed breakdown of app usage
+            </Text>
+
+            <Grid>
+              {sortedTimelineData.length === 0 ? (
+                <Grid.Col>
+                  <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
+                    No app usage data available for today.
+                  </Text>
+                </Grid.Col>
+              ) : (
+                sortedTimelineData.map((app, index) => (
+                  <Grid.Col key={index} span={6}>
+                    <Card
+                      style={{
+                        background: 'rgba(0, 0, 32, 0.3)',
+                        border: '1px solid rgba(255, 0, 255, 0.1)',
+                        borderRadius: '8px',
+                        padding: '1rem',
+                        height: '100%',
+                        transition: 'all 0.3s ease',
+                        '&:hover': {
+                          borderColor: 'rgba(255, 0, 255, 0.3)',
+                          transform: 'translateY(-2px)',
+                        }
                       }}
                     >
-                      {/* Time */}
-                      <Text style={{ 
-                        width: '60px', 
-                        color: '#AAAAAA',
-                        fontSize: '0.9rem',
-                        marginRight: '20px',
-                        textAlign: 'right',
-                        fontWeight: 500
-                      }}>
-                        {formatTimelineTime(app.lastUsed)}
-                      </Text>
-                      
-                      {/* App icon container */}
-                      <div style={{
-                        position: 'relative',
-                        zIndex: 2,
-                        background: '#FFFFFF',
-                        borderRadius: '50%',
-                        padding: '2px',
-                        marginRight: '16px'
-                      }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
                         {app.icon ? (
                           <img
                             src={`data:image/png;base64,${app.icon}`}
                             alt={app.name}
                             style={{
-                              width: '32px',
-                              height: '32px',
-                              borderRadius: '50%',
-                              objectFit: 'cover'
+                              width: '48px',
+                              height: '48px',
+                              borderRadius: '12px'
                             }}
                           />
                         ) : (
                           <div style={{
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '50%',
-                            background: app.color,
+                            width: '48px',
+                            height: '48px',
+                            borderRadius: '12px',
+                            backgroundColor: app.color || '#FF00FF',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            fontSize: '16px',
+                            fontSize: '24px',
                             color: '#FFFFFF'
                           }}>
                             {app.name.charAt(0)}
                           </div>
                         )}
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                            <Text style={{ color: '#FFFFFF', fontSize: '1.1rem', fontWeight: 500 }}>
+                              {app.name}
+                            </Text>
+                            <Badge
+                              size="sm"
+                              style={{
+                                backgroundColor: categoryColors[app.category as keyof typeof categoryColors] || '#FFFFFF',
+                                color: '#000000'
+                              }}
+                            >
+                              {app.category}
+                            </Badge>
+                          </div>
+                          <Text size="sm" style={{ color: '#AAAAAA' }}>
+                            Last used: {formatTimelineTime(app.lastUsed)}
+                          </Text>
+                        </div>
                       </div>
-                      
-                      {/* App info */}
-                      <div style={{ flex: 1 }}>
-                        <Text style={{ 
-                          color: '#FFFFFF', 
-                          fontWeight: 500,
-                          marginBottom: '4px'
-                        }}>
-                          {app.name}
-                        </Text>
-                        <Text size="sm" style={{ color: '#AAAAAA' }}>
+
+                      <div style={{ marginTop: 'auto' }}>
+                        <Text style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
                           {formatDetailedTime(app.time)}
                         </Text>
+                        <Text size="sm" style={{ color: '#AAAAAA' }}>
+                          {Math.round((app.time / totalScreenTime) * 100)}% of total screen time
+                        </Text>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </Tabs.Panel>
-
-        <Tabs.Panel value="insights" data-active-tab="insights">
-          {/* Usage Insights Dashboard */}
-          <div style={{
-            padding: '1.5rem',
-            background: 'transparent',
-            borderTop: '1px solid #FF00FF',
-            borderBottom: '1px solid #FF00FF',
-            marginBottom: '1.5rem',
-          }}>
-            <Title
-              order={3}
-              style={{
-                color: '#FF00FF',
-                marginBottom: '1.5rem',
-                textShadow: '0 0 5px #FF00FF',
-              }}
-            >
-              Usage Insights
-            </Title>
-
-            <Grid>
-              {/* Productivity Score */}
-              <Grid.Col span={12}>
-                <Paper
-                  style={{
-                    background: 'rgba(0, 0, 32, 0.3)',
-                    padding: '1.5rem',
-                    borderRadius: '8px',
-                    marginBottom: '1.5rem'
-                  }}
-                >
-                  <div style={{ textAlign: 'center' }}>
-                    <Text size="xl" fw={700} style={{ color: '#00FFFF', marginBottom: '1rem' }}>
-                      Productivity Score
-                    </Text>
-                    <div style={{ 
-                      display: 'flex', 
-                      justifyContent: 'center', 
-                      alignItems: 'center',
-                      gap: '1rem',
-                      marginBottom: '1rem'
-                    }}>
-                      <Text size="3rem" style={{ 
-                        color: getProductivityColor(productivityScore),
-                        fontWeight: 700,
-                        textShadow: `0 0 10px ${getProductivityColor(productivityScore)}`
-                      }}>
-                        {productivityScore}
-                      </Text>
-                      <Badge 
-                        size="lg"
-                        style={{ 
-                          backgroundColor: getProductivityColor(productivityScore),
-                          color: '#000000'
-                        }}
-                      >
-                        {getProductivityLabel(productivityScore)}
-                      </Badge>
-                    </div>
-                  </div>
-
-                  {/* Category Distribution */}
-                  <div style={{ marginTop: '2rem' }}>
-                    <Text fw={500} style={{ color: '#FFFFFF', marginBottom: '1rem' }}>
-                      Category Distribution
-                    </Text>
-                    {categoryDistribution.map(({ category, time, percentage }) => (
-                      <div key={category} style={{ marginBottom: '1rem' }}>
-                        <div style={{ 
-                          display: 'flex', 
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          marginBottom: '0.5rem'
-                        }}>
-                          <Text size="sm" style={{ color: '#FFFFFF' }}>{category}</Text>
-                          <Text size="sm" style={{ color: '#AAAAAA' }}>{formatDetailedTime(time)} ({percentage}%)</Text>
-                        </div>
-                        <div style={{ 
-                          width: '100%',
-                          height: '4px',
-                          backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                          borderRadius: '2px',
-                          overflow: 'hidden'
-                        }}>
-                          <div style={{
-                            width: `${percentage}%`,
-                            height: '100%',
-                            backgroundColor: categoryColors[category as keyof typeof categoryColors] || '#FFFFFF',
-                            transition: 'width 0.3s ease'
-                          }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </Paper>
-              </Grid.Col>
-
-              {/* Most Used App */}
-              <Grid.Col span={6}>
-                <Paper
-                  style={{
-                    background: 'rgba(0, 0, 32, 0.3)',
-                    padding: '1rem',
-                    borderRadius: '8px',
-                    height: '100%'
-                  }}
-                >
-                  <Text size="lg" fw={700} style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
-                    Most Used App
-                  </Text>
-                  {mostUsedApp ? (
-                    <>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-                        {mostUsedApp.icon ? (
-                          <img
-                            src={`data:image/png;base64,${mostUsedApp.icon}`}
-                            alt={mostUsedApp.name}
-                            style={{
-                              width: '32px',
-                              height: '32px',
-                              borderRadius: '8px'
-                            }}
-                          />
-                        ) : (
-                          <div style={{
-                            width: '32px',
-                            height: '32px',
-                            borderRadius: '8px',
-                            backgroundColor: mostUsedApp.color,
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            color: '#FFFFFF'
-                          }}>
-                            {mostUsedApp.name.charAt(0)}
-                          </div>
-                        )}
-                        <Text style={{ color: '#FFFFFF' }}>{mostUsedApp.name}</Text>
-                      </div>
-                      <Text size="sm" style={{ color: '#AAAAAA' }}>
-                        {formatDetailedTime(mostUsedApp.time)} ({Math.round((mostUsedApp.time / totalScreenTime) * 100)}% of total)
-                      </Text>
-                    </>
-                  ) : (
-                    <Text style={{ color: '#AAAAAA' }}>No data available</Text>
-                  )}
-                </Paper>
-              </Grid.Col>
-
-              {/* Peak Usage Time */}
-              <Grid.Col span={6}>
-                <Paper
-                  style={{
-                    background: 'rgba(0, 0, 32, 0.3)',
-                    padding: '1rem',
-                    borderRadius: '8px',
-                    height: '100%'
-                  }}
-                >
-                  <Text size="lg" fw={700} style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
-                    Peak Usage Time
-                  </Text>
-                  {heatmapData.some(value => value > 0) ? (
-                    <>
-                      <Text style={{ color: '#FFFFFF', marginBottom: '0.5rem' }}>
-                        {formatHour(heatmapData.indexOf(Math.max(...heatmapData)))}
-                      </Text>
-                      <Text size="sm" style={{ color: '#AAAAAA' }}>
-                        {Math.round(Math.max(...heatmapData))} minutes of activity
-                      </Text>
-                    </>
-                  ) : (
-                    <Text style={{ color: '#AAAAAA' }}>No data available</Text>
-                  )}
-                </Paper>
-              </Grid.Col>
-
-              {/* Usage Pattern */}
-              <Grid.Col span={6}>
-                <Paper
-                  style={{
-                    background: 'rgba(0, 0, 32, 0.3)',
-                    padding: '1rem',
-                    borderRadius: '8px',
-                    height: '100%'
-                  }}
-                >
-                  <Text size="lg" fw={700} style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
-                    Usage Pattern
-                  </Text>
-                  {totalScreenTime > 0 ? (
-                    <>
-                      <Text style={{ color: '#FFFFFF', marginBottom: '0.5rem' }}>
-                        {totalScreenTime > screenTimeLimit ? 'Heavy' :
-                         totalScreenTime > screenTimeLimit * 0.75 ? 'Moderate' : 'Light'} Usage
-                      </Text>
-                      <Text size="sm" style={{ color: '#AAAAAA' }}>
-                        {Math.round((totalScreenTime / screenTimeLimit) * 100)}% of daily limit
-                      </Text>
-                    </>
-                  ) : (
-                    <Text style={{ color: '#AAAAAA' }}>No data available</Text>
-                  )}
-                </Paper>
-              </Grid.Col>
-
-              {/* App Diversity */}
-              <Grid.Col span={6}>
-                <Paper
-                  style={{
-                    background: 'rgba(0, 0, 32, 0.3)',
-                    padding: '1rem',
-                    borderRadius: '8px',
-                    height: '100%'
-                  }}
-                >
-                  <Text size="lg" fw={700} style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
-                    App Diversity
-                  </Text>
-                  {sortedTimelineData.length > 0 ? (
-                    <>
-                      <Text style={{ color: '#FFFFFF', marginBottom: '0.5rem' }}>
-                        {sortedTimelineData.length} apps used today
-                      </Text>
-                      <Text size="sm" style={{ color: '#AAAAAA' }}>
-                        Most active: {sortedTimelineData.slice(0, 3).map(app => app.name).join(', ')}
-                      </Text>
-                    </>
-                  ) : (
-                    <Text style={{ color: '#AAAAAA' }}>No data available</Text>
-                  )}
-                </Paper>
-              </Grid.Col>
+                    </Card>
+                  </Grid.Col>
+                ))
+              )}
             </Grid>
           </div>
         </Tabs.Panel>
 
-        <Tabs.Panel value="details" data-active-tab="details">
-          <Title
-            order={2}
-            style={{
-              fontSize: '1.5rem',
-              marginBottom: '0.5rem',
-              color: '#00FFFF',
-            }}
-          >
-            Detailed App Usage
-          </Title>
-          <Text size="sm" style={{ color: '#AAAAAA', marginBottom: '2rem' }}>
-            Detailed breakdown of app usage
-          </Text>
-
-          <Grid>
-            {sortedTimelineData.length === 0 ? (
-              <Grid.Col>
-                <Text style={{ color: '#00FFFF', textAlign: 'center', padding: '2rem' }}>
-                  No app usage data available for today.
-                </Text>
-              </Grid.Col>
-            ) : (
-              sortedTimelineData.map((app, index) => (
-                <Grid.Col key={index} span={6}>
-                  <Card
-                    style={{
-                      background: 'rgba(0, 0, 32, 0.3)',
-                      border: '1px solid rgba(255, 0, 255, 0.1)',
-                      borderRadius: '8px',
-                      padding: '1rem',
-                      height: '100%',
-                      transition: 'all 0.3s ease',
-                      '&:hover': {
-                        borderColor: 'rgba(255, 0, 255, 0.3)',
-                        transform: 'translateY(-2px)',
-                      }
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
-                      {app.icon ? (
-                        <img
-                          src={`data:image/png;base64,${app.icon}`}
-                          alt={app.name}
-                          style={{
-                            width: '48px',
-                            height: '48px',
-                            borderRadius: '12px'
-                          }}
-                        />
-                      ) : (
-                        <div style={{
-                          width: '48px',
-                          height: '48px',
-                          borderRadius: '12px',
-                          backgroundColor: app.color || '#FF00FF',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '24px',
-                          color: '#FFFFFF'
-                        }}>
-                          {app.name.charAt(0)}
-                        </div>
-                      )}
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                          <Text style={{ color: '#FFFFFF', fontSize: '1.1rem', fontWeight: 500 }}>
-                            {app.name}
-                          </Text>
-                          <Badge
-                            size="sm"
-                            style={{
-                              backgroundColor: categoryColors[app.category as keyof typeof categoryColors] || '#FFFFFF',
-                              color: '#000000'
-                            }}
-                          >
-                            {app.category}
-                          </Badge>
-                        </div>
-                        <Text size="sm" style={{ color: '#AAAAAA' }}>
-                          Last used: {formatTimelineTime(app.lastUsed)}
-                        </Text>
-                      </div>
-                    </div>
-
-                    <div style={{ marginTop: 'auto' }}>
-                      <Text style={{ color: '#00FFFF', marginBottom: '0.5rem' }}>
-                        {formatDetailedTime(app.time)}
-                      </Text>
-                      <Text size="sm" style={{ color: '#AAAAAA' }}>
-                        {Math.round((app.time / totalScreenTime) * 100)}% of total screen time
-                      </Text>
-                    </div>
-                  </Card>
-                </Grid.Col>
-              ))
-            )}
-          </Grid>
-        </Tabs.Panel>
-
         <Tabs.Panel value="focus" data-active-tab="focus">
-          <div style={{ maxWidth: '600px', margin: '0 auto', paddingBottom: '80px' }}>
+          <div style={{
+            position: 'relative', // Added for positioning the lock message
+            filter: !isTabUnlocked('focus_tab') ? 'blur(10px)' : 'none',
+            pointerEvents: !isTabUnlocked('focus_tab') ? 'none' : 'auto',
+            transition: 'filter 0.3s ease-in-out', // Smooth transition for blur
+            maxWidth: '600px', margin: '0 auto', paddingBottom: '80px'
+          }}>
+            {!isTabUnlocked('focus_tab') && (
+              <Paper
+                style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  padding: '2rem',
+                  background: 'rgba(0, 0, 32, 0.7)',
+                  borderRadius: '8px',
+                  textAlign: 'center',
+                  zIndex: 10,
+                  pointerEvents: 'auto'
+                }}
+              >
+                <Title order={3} style={{ color: '#FF00FF', marginBottom: '1rem' }}>
+                  Unlock Focus Mode
+                </Title>
+                <Text style={{ color: '#00FFFF', marginBottom: '1.5rem' }}>
+                  Purchase this feature to use the focus timer and track sessions.
+                </Text>
+                <button
+                  onClick={() => initiateDirectPurchase('focus')}
+                  disabled={isProcessingPayment || attemptingToUnlockTab === 'focus'}
+                  style={{
+                    padding: '0.75rem 1.5rem',
+                    fontSize: '1rem',
+                    color: '#FFFFFF',
+                    backgroundColor: '#FF00FF',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    boxShadow: '0 0 10px #FF00FF',
+                    transition: 'all 0.2s ease',
+                    opacity: (isProcessingPayment || attemptingToUnlockTab === 'focus') ? 0.5 : 1,
+                  }}
+                >
+                  {isProcessingPayment && attemptingToUnlockTab === 'focus'
+                    ? 'Processing...'
+                    : 'Unlock Now'}
+                </button>
+              </Paper>
+            )}
             <FocusTimer onSessionComplete={handleFocusSessionComplete} />
 
             {/* Focus Sessions Summary */}
